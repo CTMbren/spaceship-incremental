@@ -14,7 +14,7 @@ Status: PLANNING ONLY. No code changed. Brendan's seven notes, a critical review
 ## 2. Verdicts at a glance
 | # | Note | Verdict | Size |
 |---|---|---|---|
-| 1 | Fire unlocked until Bay full | Yes, with a precise "room" rule. Reverses Patch 4.1; ask why that lock existed | Patch |
+| 1 | Fire unlocked until Bay full | Yes, with a precise "room" rule plus clear Bay feedback. The 4.1 lock was a reaction to missing feedback | Patch |
 | 2 | "Smelter autofills" | Probably means the **Smasher** (L2 feeds itself from the Bay). Confirm. Note 1 makes it work with one beam | Clarify |
 | 3 | More Smashers and Smelters, exponential cost | Yes, and it fixes a real gap (Open tiles have nothing to build). His 120 / 360 / 1000 checks out against the upgrade ladder. Needs caps, Move/Sell and a save refactor first | Feature (Day 7/8) |
 | 4 | Sell revamp | Keep the one-tap Sell; add a Stock sheet with per-item rows. Do not make every sale two taps | Feature |
@@ -25,7 +25,7 @@ Status: PLANNING ONLY. No code changed. Brendan's seven notes, a critical review
 **What it does today.** Fire and the beam tiles are locked while a rock is in the stage (Patch 4.1, requested by Brendan: "disable the button if there is a rock in the hit box"). With one beam that means the Bay is never used, so Smasher auto-intake (L2) does nothing until beam 2.
 
 **Critical review.**
-- This reverses an explicit Patch 4.1 request. Newest wins, but we should know why the lock existed (accidental taps while crushing? beam taps stealing taps from the rock? a rock arriving mid-crush being confusing?). If it was accidental taps, the fix is the beam tile staying where it is (it is far from the rock), not a lock.
+- This reverses a Patch 4.1 request, but Brendan has explained it (Oct 27): the button could be pressed while a rock was in the stage, he thought pressing it did nothing, and it may in fact have added a rock to the Bay. So the lock was a response to **missing feedback, not to a wrong rule**. The right fix is to keep the rule (rocks queue in the Bay) and make the result obvious: see "Feedback" below.
 - Economy: for a hand-crushing player nothing changes (crushing takes 4 to 6 s, the beam takes 1 s). The gain goes to the Smasher: with Bay rocks available, L2 auto-intake works with one beam, so beam 2 becomes a throughput upgrade instead of a prerequisite. That shifts the goal chain (beam 2 is currently the post-repair goal). The bot sim must be re-run before shipping.
 - It makes the Bay a real resource, which ties directly to the planned **Bay size upgrade (3 to 6)**. Worth adding to the Workshop in the same patch because Bay size would now matter. Bay upgrade cost is still an open decision.
 - It does not make the game idle. Beams still need a tap per rock until the Auto-Winch module (planned around minute 15 to 18). Offline progress already assumes hands-free firing, which is generous before the Auto-Winch exists; fine at 30% / 10%, but note it.
@@ -36,6 +36,13 @@ Status: PLANNING ONLY. No code changed. Brendan's seven notes, a critical review
 - Fire button: starts idle beams, as many as there is room for (first beams first).
 - Fire is disabled only when there is no room. Labels: `Fire beam`, `Fire 2 beams`, `Incoming 0.6s`, `Bay full 3/3`.
 - A geode in the stage no longer stalls the beams, so the offline "geode waiting" stall mostly goes away (it still stalls at Smasher L1 because L1 has no auto-intake).
+
+**Feedback (the real fix for the 4.1 confusion).** Today, while a rock is in the stage the stage text is hidden and the only clues are a small Bay strip and a countdown ring on the beam tile. Add:
+- Fire label shows what happened and the state: `Incoming 0.6s`, then `Bay 2/3`, then `Bay full 3/3` (disabled).
+- A pulsing ghost rock in the next free Bay slot while a rock is incoming, and a pop when it lands.
+- A short floating `+1 Bay` (or `Bay 2/3`) over the Bay strip when a rock arrives.
+- The Bay strip moves closer to the stage or gets bigger slots (it is 30 px each now).
+- Help text in the menu: "Fire again to stock up the Bay."
 
 **Tests/sim.** Room rule (3 beams, 1 free slot fires 1), in-flight counting, Bay-full disables, auto-intake with one beam, bot re-run for casual and idle.
 
@@ -115,7 +122,7 @@ Hull tiles already do: `round5(60 x 1.23^(n-4))`, tile 18 is 1,090 and the total
 
 ## 10. Questions for Brendan (each has a default)
 1. Note 2: did you mean Smasher level 2 auto-feed? (Default: yes.)
-2. Why did you want Fire locked while a rock is in the stage in Patch 4.1? (Default: it was accidental taps; unlock per this doc.)
+2. ~~Why did you want Fire locked in Patch 4.1?~~ Answered Oct 27: pressing it seemed to do nothing, but it was probably adding a rock to the Bay. Decision: unlock per this doc and fix the feedback.
 3. Keep the first Smelter at 25 Ore and start the x3 curve at copy 2? (Default: yes.)
 4. Caps of 3 Smashers and 3 Smelters, with Move and Sell (75% refund) built first? (Default: yes.)
 5. Add Copy/Paste save to the menu? (Default: not in 6.1; offer again after the playtest.)
