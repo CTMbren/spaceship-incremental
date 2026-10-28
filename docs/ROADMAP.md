@@ -15,11 +15,13 @@ Goal (2 weeks): core loop, polished, playable on iPhone 12 / Chrome via GitHub P
 3. Hand Tools upgrade sheet (hold speed, heat cap) with costs from `economy-and-details.md`.
 4. Port `src/sim/econ_sim.py` to TypeScript; check the first 30 minutes against the real rules (casual ~70 min, semi-idle <=85 min target with the Smasher).
 5. Day 6: offline catch-up tiers (0-2 h 30%, 2-8 h 10%, cap 8 h) + welcome-back, upgrade UI polish, playtest build.
+- Visual update (ship view): the ship is drawn at 1.5x, runs left to right with the nose on the left (presentation only; hull data and saves unchanged, template (x, y) maps to screen column = y, row = x). When the ship plus buy slots no longer fit, small arrows appear on the edges (hold to scroll; buying a tile scrolls it into view); the view is clipped to its own area. New exterior in `src/game/hullArt.ts`: seam-free hull body, nose cone with canopy, engine bells on exposed rear cells, swept fins on the finished hull's top and bottom edges, orange accent stripe, rim light and rivets, all derived from owned tiles. Layout maths in `src/game/shipLayout.ts` (pure, 11 tests). 63 tests.
 
 ## Planned: Milestone 2 (planning only, see `docs/travel-shop-rover-jump-plan.md`)
 Travel along a system route (Engine, nodes, offline travel), Rover expeditions at planets, three shops (Workshop, Station Trader, Flux Exchange), Jump as shockwave damage with Braces instead of a reset, more modules. Proposed order: Days 8 to 12 after the Day 7 core-loop and layout playtest gate. Open decisions for Brendan are in section 9 of that doc.
 
 ## Known issues
+- Ship art is still code-drawn placeholder styling; the Tug template's nose is one tile off-centre (rows 1-2 of 5), so the silhouette is slightly lopsided. Module tiles are still labelled squares.
 - Patch 4.1 changed the hand-crack time a lot (about 2.5x longer taps) and the beam is much faster; the econ sim has not been re-run, expect hour-one pacing to shift (Smasher is now the main way to keep up). Re-tune in the Day 5 sim port.
 - With one beam and the beam locked during a rock, the Bay stays empty, so Smasher auto-intake (L2) does nothing until the second beam arrives (Day 5).
 - Build tab, Smelter and placement are visual stubs; the Open tile is a placeholder. The Smasher sits at a fixed cell (2,1), adjacency for auto-intake is assumed.

@@ -12,15 +12,19 @@ import type { Cell, Cost, GameEvent, GameState } from '../core/types';
 import { BAL } from '../data/balance';
 import { SMASHER } from '../data/smasher';
 import { HULLS } from '../data/hulls';
+import { drawHullExterior } from './hullArt';
 import { C, FONT, T } from './palette';
+import {
+  arrowsFor, boundsOf, CELL, clampPan, localPos, panLimits, panToShow, toScreen, VIEW, ZOOM,
+  type PanLimits,
+} from './shipLayout';
 
 export const W = 390;
 export const H = 844;
 /** Render at the device pixel ratio (capped) so text and shapes stay sharp on retina phones. */
 export const DPR = Math.min(Math.max(window.devicePixelRatio || 1, 1), 3);
-const TILE = 56;
-const OX = 55; // 5 columns * 56 = 280, centred in 390
-const OY = 150;
+const TILE = CELL; // local tile size; the ship container is scaled by ZOOM on screen
+const PAN_SPEED = 420; // px per second while an arrow is held
 const MAX_GHOSTS = 4;
 const STAGE = { x: 16, y: 466, w: 358, h: 184, cx: 195, cy: 556, r: 60 };
 const STRIP_Y = 660;
@@ -37,6 +41,13 @@ export class ShipScene extends Phaser.Scene {
   private toast?: Phaser.GameObjects.Text;
   private debug = new URLSearchParams(window.location.search).has('debug');
   private dyn!: Phaser.GameObjects.Graphics;
+  private ship!: Phaser.GameObjects.Container; // zoomed, panned, clipped to VIEW
+  private dynShip!: Phaser.GameObjects.Graphics; // per-frame overlays in ship (local) space
+  private limits!: PanLimits;
+  private pan = { x: 0, y: 0 };
+  private panGoal = { x: 0, y: 0 };
+  private panDir = { x: 0, y: 0 };
+  private arrowZones: Partial<Record<'left' | 'right' | 'up' | 'down', Phaser.GameObjects.Zone>> = {};
   private tx!: Record<'stage' | 'fire' | 'sell' | 'beam' | 'heat' | 'bay' | 'hp' | 'send' | 'smash', Phaser.GameObjects.Text>;
   private holdPointer: Phaser.Input.Pointer | null = null;
   private sheet?: Phaser.GameObjects.Container;
@@ -57,9 +68,16 @@ export class ShipScene extends Phaser.Scene {
     cam.setZoom(DPR);
     cam.setScroll(-(W * DPR - W) / 2, -(H * DPR - H) / 2);
     this.drawStars();
+    this.ship = this.add.container(0, 0).setScale(ZOOM);
     this.layer = this.add.container(0, 0);
+    this.dynShip = this.add.graphics();
+    this.ship.add([this.layer, this.dynShip]);
+    const clip = this.make.graphics({ x: 0, y: 0 }, false);
+    clip.fillStyle(0xffffff, 1).fillRect(VIEW.x, VIEW.y, VIEW.w, VIEW.h);
+    this.ship.setMask(clip.createGeometryMask());
     this.hud = this.add.container(0, 0);
     this.buildDynamic();
+    this.updateLimits(true);
     this.redraw();
     if (this.debug) (window as unknown as { __ship: ShipScene }).__ship = this; // for scripted tests
     document.addEventListener('visibilitychange', () => {
@@ -75,6 +93,7 @@ export class ShipScene extends Phaser.Scene {
     this.handleEvents(out.events, W / 2, STAGE.cy);
     this.afterEvents(out.events);
     this.updateHold(dt);
+    this.updatePan(dt);
     this.saveTimer += dt;
     if (this.saveTimer > 5) {
       this.saveTimer = 0;
@@ -127,6 +146,7 @@ export class ShipScene extends Phaser.Scene {
     const res = buyTile(this.state, cell);
     if (res.ok) {
       this.apply(res.state);
+      this.focusCell(cell);
       return;
     }
     const msg: Record<string, string> = {
@@ -143,64 +163,128 @@ export class ShipScene extends Phaser.Scene {
   private redraw(): void {
     this.layer.removeAll(true);
     this.hud.removeAll(true);
+    this.updateLimits(false);
     this.drawHull();
     this.drawGhosts();
     this.drawHud();
     this.drawTabs();
   }
 
-  private px(c: Cell): { x: number; y: number } {
-    return { x: OX + c.x * TILE, y: OY + c.y * TILE };
+  // ---- ship camera: zoom, pan and the scroll arrows ---------------------------------------------
+  private ghostCells(): Cell[] {
+    const def = HULLS[this.state.ship.hullId];
+    const owned = new Set(this.state.ship.ownedCells);
+    if (!nextTileCost(def, owned.size)) return [];
+    return unlockableCells(def, owned)
+      .sort((a, b) => Math.abs(a.x - 2) + a.y - (Math.abs(b.x - 2) + b.y))
+      .slice(0, MAX_GHOSTS);
   }
 
-  /** Hull silhouette = union of per-tile rounded rects (outline layer, then fill layer, then deck). */
+  /** Recompute scroll limits from the owned tiles and ghost tiles; `first` also sets the starting pan. */
+  private updateLimits(first: boolean): void {
+    this.limits = panLimits(boundsOf(this.state.ship.ownedCells.map(parseKey), this.ghostCells()));
+    const l = this.limits;
+    if (first) {
+      this.panGoal = { x: l.fitsX ? l.minX : l.maxX, y: l.fitsY ? l.minY : (l.minY + l.maxY) / 2 };
+      this.pan = { ...this.panGoal };
+      this.ship.setPosition(this.pan.x, this.pan.y);
+    } else {
+      this.panGoal = clampPan(this.panGoal, l);
+    }
+  }
+
+  private updatePan(dt: number): void {
+    if (this.panDir.x || this.panDir.y) {
+      this.panGoal = clampPan(
+        { x: this.panGoal.x + this.panDir.x * PAN_SPEED * dt, y: this.panGoal.y + this.panDir.y * PAN_SPEED * dt },
+        this.limits,
+      );
+    }
+    const k = Math.min(1, dt * 10);
+    this.pan.x += (this.panGoal.x - this.pan.x) * k;
+    this.pan.y += (this.panGoal.y - this.pan.y) * k;
+    this.ship.setPosition(this.pan.x, this.pan.y);
+  }
+
+  /** Scroll so a (newly bought) tile is visible. */
+  private focusCell(c: Cell): void {
+    this.panGoal = panToShow(this.panGoal, c, this.limits);
+  }
+
+  /** World (screen) position of the centre of a template cell, following the current pan. */
+  private cellWorld(c: Cell): { x: number; y: number } {
+    const p = localPos(c);
+    return { x: this.pan.x + (p.x + TILE / 2) * ZOOM, y: this.pan.y + (p.y + TILE / 2) * ZOOM };
+  }
+
+  private inView(p: Phaser.Input.Pointer): boolean {
+    return p.worldX >= VIEW.x && p.worldX < VIEW.x + VIEW.w && p.worldY >= VIEW.y && p.worldY < VIEW.y + VIEW.h;
+  }
+
+  /** Text that lives inside the zoomed ship container: rasterise at DPR * ZOOM so it stays sharp. */
+  private shipTxt(x: number, y: number, text: string, style: Phaser.Types.GameObjects.Text.TextStyle): Phaser.GameObjects.Text {
+    return this.add.text(x, y, text, { ...style, resolution: DPR * ZOOM });
+  }
+
+  private arrowRects(): Record<'left' | 'right' | 'up' | 'down', { x: number; y: number; w: number; h: number }> {
+    const cy = VIEW.y + VIEW.h / 2, cx = VIEW.x + VIEW.w / 2;
+    return {
+      left: { x: 4, y: cy - 30, w: 36, h: 60 },
+      right: { x: VIEW.w - 40, y: cy - 30, w: 36, h: 60 },
+      up: { x: cx - 30, y: VIEW.y + 4, w: 60, h: 36 },
+      down: { x: cx - 30, y: VIEW.y + VIEW.h - 40, w: 60, h: 36 },
+    };
+  }
+
+  private drawArrows(g: Phaser.GameObjects.Graphics): void {
+    const a = arrowsFor(this.pan, this.limits);
+    const r = this.arrowRects();
+    const pulse = 0.75 + 0.25 * Math.sin(this.elapsed * 4);
+    (['left', 'right', 'up', 'down'] as const).forEach((k) => {
+      const z = this.arrowZones[k];
+      if (z?.input && z.input.enabled !== a[k]) z.input.enabled = a[k]; // hidden arrows must not eat taps
+      if (!a[k]) return;
+      const { x, y, w, h } = r[k];
+      g.fillStyle(C.panel, 0.9).fillRoundedRect(x, y, w, h, 16);
+      g.lineStyle(3, C.panelEdge, 1).strokeRoundedRect(x, y, w, h, 16);
+      const cx = x + w / 2, cy = y + h / 2;
+      g.fillStyle(C.highlight, pulse);
+      if (k === 'left') g.fillTriangle(cx + 6, cy - 12, cx + 6, cy + 12, cx - 8, cy);
+      if (k === 'right') g.fillTriangle(cx - 6, cy - 12, cx - 6, cy + 12, cx + 8, cy);
+      if (k === 'up') g.fillTriangle(cx - 12, cy + 6, cx + 12, cy + 6, cx, cy - 8);
+      if (k === 'down') g.fillTriangle(cx - 12, cy - 6, cx + 12, cy - 6, cx, cy + 8);
+    });
+  }
+
+  private px(c: Cell): { x: number; y: number } {
+    return localPos(c);
+  }
+
+  /** Ship exterior (silhouette, nose, fins, engines) plus the module placeholders on the start tiles. */
   private drawHull(): void {
-    const owned = this.state.ship.ownedCells.map(parseKey);
-    const set = new Set(this.state.ship.ownedCells);
+    const ownedKeys = this.state.ship.ownedCells;
+    const owned = ownedKeys.map(parseKey);
     const g = this.add.graphics();
     this.layer.add(g);
-
-    // engine nozzles under bottom-edge cells (only where the finished hull also ends)
-    const finished = new Set(HULLS[this.state.ship.hullId].template.map(cellKey));
-    for (const c of owned) {
-      if (!finished.has(cellKey({ x: c.x, y: c.y + 1 }))) {
-        const { x, y } = this.px(c);
-        g.fillStyle(C.hullOutline, 1).fillRoundedRect(x + 10, y + TILE - 2, 36, 18, 6);
-        g.fillStyle(C.beam, 0.35).fillRoundedRect(x + 16, y + TILE + 14, 24, 14, 7);
-      }
-    }
-    for (const c of owned) {
-      const { x, y } = this.px(c);
-      g.fillStyle(C.hullOutline, 1).fillRoundedRect(x - 9, y - 9, TILE + 18, TILE + 18, 18);
-    }
-    for (const c of owned) {
-      const { x, y } = this.px(c);
-      g.fillStyle(C.hull, 1).fillRoundedRect(x - 5, y - 5, TILE + 10, TILE + 10, 14);
-    }
-    // top-left rim light on cells with an exposed top edge
-    for (const c of owned) {
-      if (!set.has(cellKey({ x: c.x, y: c.y - 1 }))) {
-        const { x, y } = this.px(c);
-        g.fillStyle(C.hullRim, 1).fillRoundedRect(x + 2, y - 3, TILE - 4, 4, 2);
-      }
-    }
+    const finished = new Set(HULLS[this.state.ship.hullId].template.map((c) => `${toScreen(c).col},${toScreen(c).row}`));
+    drawHullExterior(g, owned, finished, new Set(this.ghostCells().map((c) => `${toScreen(c).col},${toScreen(c).row}`)));
     for (const c of owned) {
       const { x, y } = this.px(c);
       g.fillStyle(C.deck, 1).fillRoundedRect(x + 2, y + 2, TILE - 4, TILE - 4, 8);
       g.lineStyle(2, C.deckEdge, 1).strokeRoundedRect(x + 2, y + 2, TILE - 4, TILE - 4, 8);
     }
 
-    // Day 1 placeholder modules on the 1x3 start: beam, crusher, empty smelter slot
+    // Day 1 placeholder modules on the 1x3 start: beam (nose), smasher, empty slot
     this.placeholder(owned, { x: 2, y: 0 }, C.beamDeep, '');
     const bp = this.px({ x: 2, y: 0 });
     const beamHit = this.add.zone(bp.x + TILE / 2, bp.y + TILE / 2, TILE, TILE).setInteractive();
-    beamHit.on('pointerdown', () => this.onBeamTap());
+    beamHit.on('pointerdown', (p: Phaser.Input.Pointer) => { if (this.inView(p)) this.onBeamTap(); });
     this.layer.add(beamHit);
     const rusty = !this.state.smasher.repaired;
     this.placeholder(owned, { x: 2, y: 1 }, rusty ? 0x6b5648 : C.crusher, rusty ? 'Rusty' : 'Smash');
     const sp = this.px({ x: 2, y: 1 });
     const smHit = this.add.zone(sp.x + TILE / 2, sp.y + TILE / 2, TILE, TILE).setInteractive();
-    smHit.on('pointerdown', () => this.onSmasherTap());
+    smHit.on('pointerdown', (p: Phaser.Input.Pointer) => { if (this.inView(p)) this.onSmasherTap(); });
     this.layer.add(smHit);
     this.placeholder(owned, { x: 2, y: 2 }, 0x18223f, 'Open', true);
   }
@@ -211,30 +295,26 @@ export class ShipScene extends Phaser.Scene {
     const g = this.add.graphics();
     g.fillStyle(color, 1).fillRoundedRect(x + 7, y + 7, TILE - 14, TILE - 14, 8);
     if (outline) g.lineStyle(2, C.beam, 0.9).strokeRoundedRect(x + 7, y + 7, TILE - 14, TILE - 14, 8);
-    const t = this.txt(x + TILE / 2, y + TILE / 2, label, { fontFamily: FONT, fontSize: '12px', color: T.text }).setOrigin(0.5);
+    const t = this.shipTxt(x + TILE / 2, y + TILE / 2, label, { fontFamily: FONT, fontSize: '12px', color: T.text }).setOrigin(0.5);
     this.layer.add([g, t]);
   }
 
   private drawGhosts(): void {
     const def = HULLS[this.state.ship.hullId];
-    const owned = new Set(this.state.ship.ownedCells);
-    const cost = nextTileCost(def, owned.size);
+    const cost = nextTileCost(def, this.state.ship.ownedCells.length);
     if (!cost) return;
-    const ghosts = unlockableCells(def, owned)
-      .sort((a, b) => Math.abs(a.x - 2) + a.y - (Math.abs(b.x - 2) + b.y))
-      .slice(0, MAX_GHOSTS);
     const ok = canAfford(this.state, cost) === 'ok';
-    for (const c of ghosts) {
+    for (const c of this.ghostCells()) {
       const { x, y } = this.px(c);
       const g = this.add.graphics();
       this.dashedRect(g, x + 3, y + 3, TILE - 6, TILE - 6, ok ? C.crit : C.ghost);
       const label = this
-        .txt(x + TILE / 2, y + TILE / 2, String(cost.credits), {
+        .shipTxt(x + TILE / 2, y + TILE / 2, String(cost.credits), {
           fontFamily: FONT, fontSize: '15px', fontStyle: '600', color: ok ? T.gold : T.dim,
         })
         .setOrigin(0.5);
       const hit = this.add.zone(x + TILE / 2, y + TILE / 2, 56, 56).setInteractive({ useHandCursor: true });
-      hit.on('pointerup', () => this.tryBuy(c));
+      hit.on('pointerup', (p: Phaser.Input.Pointer) => { if (this.inView(p)) this.tryBuy(c); });
       this.layer.add([g, label, hit]);
     }
   }
@@ -296,11 +376,13 @@ export class ShipScene extends Phaser.Scene {
     this.hud.add([chip, chipLabel]);
 
     if (!st.flags.tappedBeam) {
-      const bx = OX + 2 * TILE + TILE / 2;
+      const bw = this.cellWorld({ x: 2, y: 0 });
+      const bx = bw.x;
+      const top = bw.y - 28 * ZOOM - 8 - 26 - 14; // above the nose tile (and its canopy)
       const b = this.add.graphics();
-      b.fillStyle(C.highlight, 1).fillRoundedRect(bx - 62, 116, 124, 26, 13);
-      b.fillTriangle(bx - 7, 141, bx + 7, 141, bx, 149);
-      const bt = this.txt(bx, 129, 'Tap the beam.', { fontFamily: FONT, fontSize: '14px', fontStyle: '600', color: '#0B1020' }).setOrigin(0.5);
+      b.fillStyle(C.highlight, 1).fillRoundedRect(bx - 62, top, 124, 26, 13);
+      b.fillTriangle(bx - 7, top + 25, bx + 7, top + 25, bx, top + 33);
+      const bt = this.txt(bx, top + 13, 'Tap the beam.', { fontFamily: FONT, fontSize: '14px', fontStyle: '600', color: '#0B1020' }).setOrigin(0.5);
       this.hud.add([b, bt]);
     }
 
@@ -359,7 +441,8 @@ export class ShipScene extends Phaser.Scene {
     const out = tapBeam(this.state);
     if (out.state === this.state) return;
     this.apply(out.state);
-    this.floatText(OX + 2 * TILE + TILE / 2, OY - 6, 'Beam on', T.gold);
+    const bw = this.cellWorld({ x: 2, y: 0 });
+    this.floatText(bw.x, Math.max(VIEW.y + 16, bw.y - 28 * ZOOM - 6), 'Beam on', T.gold);
   }
 
   private onStageDown(p: Phaser.Input.Pointer): void {
@@ -435,7 +518,7 @@ export class ShipScene extends Phaser.Scene {
       actionLabel = can ? `Repair · ${costStr}` : `Need ${costStr}`;
       action = () => {
         const r = repairSmasher(this.state);
-        if (r.ok) { this.apply(r.state); this.handleEvents(r.events, STAGE.cx, STAGE.cy); this.floatText(OX + 2 * TILE + TILE / 2, OY + TILE + 10, 'Repaired!', T.gold); this.closeSheet(); }
+        if (r.ok) { this.apply(r.state); this.handleEvents(r.events, STAGE.cx, STAGE.cy); this.floatText(this.cellWorld({ x: 2, y: 1 }).x, this.cellWorld({ x: 2, y: 1 }).y - 20, 'Repaired!', T.gold); this.closeSheet(); }
         else this.showToast('Not enough materials');
       };
     } else {
@@ -515,7 +598,7 @@ export class ShipScene extends Phaser.Scene {
           this.floatText(STAGE.cx, STAGE.cy - 30, 'Sent!', T.gold);
           break;
         case 'smashed':
-          this.floatText(OX + 2 * TILE + TILE / 2, OY + TILE + 6, `+${e.ore} Ore`, T.text);
+          this.floatText(this.cellWorld({ x: 2, y: 1 }).x, this.cellWorld({ x: 2, y: 1 }).y - 20, `+${e.ore} Ore`, T.text);
           break;
         default:
           break;
@@ -546,7 +629,7 @@ export class ShipScene extends Phaser.Scene {
     this.dyn = this.add.graphics().setDepth(5);
     const mk = (size: number, color: string = T.text) =>
       this.txt(0, 0, '', { fontFamily: FONT, fontSize: `${size}px`, fontStyle: '600', color, align: 'center' }).setOrigin(0.5).setDepth(6);
-    this.tx = { stage: mk(15, T.dim), fire: mk(17), sell: mk(17, '#0B1020'), beam: mk(17), heat: mk(12, T.dim), bay: mk(12, T.dim), hp: mk(12, T.dim), send: mk(15, '#0B1020'), smash: mk(12, T.text) };
+    this.tx = { stage: mk(15, T.dim), fire: mk(17), sell: mk(17, '#0B1020'), beam: this.beamLabel(), heat: mk(12, T.dim), bay: mk(12, T.dim), hp: mk(12, T.dim), send: mk(15, '#0B1020'), smash: mk(12, T.text) };
 
     const stage = this.add.zone(STAGE.x + STAGE.w / 2, STAGE.y + STAGE.h / 2, STAGE.w, STAGE.h).setInteractive();
     stage.on('pointerdown', (p: Phaser.Input.Pointer) => this.onStageDown(p));
@@ -556,6 +639,26 @@ export class ShipScene extends Phaser.Scene {
     fire.on('pointerdown', () => this.onBeamTap());
     const sellZ = this.add.zone(238 + 68, ACTION.y + ACTION.h / 2, 136, ACTION.h).setInteractive();
     sellZ.on('pointerdown', () => this.onSell());
+
+    // scroll arrows: hold to pan; only active while the arrow is visible
+    const dirs = { left: { x: 1, y: 0 }, right: { x: -1, y: 0 }, up: { x: 0, y: 1 }, down: { x: 0, y: -1 } } as const;
+    const rects = this.arrowRects();
+    (['left', 'right', 'up', 'down'] as const).forEach((k) => {
+      const r = rects[k];
+      const z = this.add.zone(r.x + r.w / 2, r.y + r.h / 2, r.w + 12, r.h + 12).setInteractive().setDepth(7);
+      this.arrowZones[k] = z;
+      const stop = () => { this.panDir = { x: 0, y: 0 }; };
+      z.on('pointerdown', () => { if (arrowsFor(this.pan, this.limits)[k]) this.panDir = { ...dirs[k] }; });
+      z.on('pointerup', stop);
+      z.on('pointerout', stop);
+      z.on('pointerupoutside', stop);
+    });
+  }
+
+  private beamLabel(): Phaser.GameObjects.Text {
+    const t = this.shipTxt(0, 0, '', { fontFamily: FONT, fontSize: '17px', fontStyle: '600', color: T.text, align: 'center' }).setOrigin(0.5);
+    this.ship.add(t); // sits above the overlay graphics inside the zoomed container
+    return t;
   }
 
   private setText(t: Phaser.GameObjects.Text, x: number, y: number, str: string, color?: string): void {
@@ -572,6 +675,8 @@ export class ShipScene extends Phaser.Scene {
     const beam = st.beams[0];
     const now = this.elapsed;
     g.clear();
+    const sg = this.dynShip;
+    sg.clear();
 
     // --- beam tile overlay (ring + countdown)
     const bp = this.px({ x: 2, y: 0 });
@@ -579,17 +684,17 @@ export class ShipScene extends Phaser.Scene {
     let beamLabel = '';
     if (beam.status === 'counting') {
       const frac = 1 - beam.remaining / BAL.beamCountdown;
-      g.lineStyle(4, C.beam, 1).beginPath().arc(bcx, bcy, 18, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac, false).strokePath();
-      g.lineStyle(4, C.hull, 0.35).strokeCircle(bcx, bcy, 18);
+      sg.lineStyle(4, C.beam, 1).beginPath().arc(bcx, bcy, 18, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac, false).strokePath();
+      sg.lineStyle(4, C.hull, 0.35).strokeCircle(bcx, bcy, 18);
       beamLabel = String(Math.ceil(Math.max(0, beam.remaining)));
     } else if (beam.status === 'idle' && c.rock) {
-      g.lineStyle(3, C.hull, 0.35).strokeRoundedRect(bp.x + 2, bp.y + 2, TILE - 4, TILE - 4, 10); // locked: rock in stage
+      sg.lineStyle(3, C.hull, 0.35).strokeRoundedRect(bp.x + 2, bp.y + 2, TILE - 4, TILE - 4, 10); // locked: rock in stage
     } else if (beam.status === 'idle') {
       const pulse = 0.55 + 0.45 * Math.sin(now * 5);
-      g.lineStyle(3, C.crit, st.flags.tappedBeam ? 0.9 : pulse).strokeRoundedRect(bp.x + 2, bp.y + 2, TILE - 4, TILE - 4, 10);
+      sg.lineStyle(3, C.crit, st.flags.tappedBeam ? 0.9 : pulse).strokeRoundedRect(bp.x + 2, bp.y + 2, TILE - 4, TILE - 4, 10);
       beamLabel = st.flags.tappedBeam ? '' : '';
     } else {
-      g.lineStyle(3, 0xffa733, 1).strokeRoundedRect(bp.x + 2, bp.y + 2, TILE - 4, TILE - 4, 10);
+      sg.lineStyle(3, 0xffa733, 1).strokeRoundedRect(bp.x + 2, bp.y + 2, TILE - 4, TILE - 4, 10);
       beamLabel = 'Full';
     }
     this.setText(this.tx.beam, bcx, bcy, beamLabel);
@@ -636,7 +741,7 @@ export class ShipScene extends Phaser.Scene {
 
     // --- Send button + Smasher overlay
     this.drawSend(g, st);
-    this.drawSmasher(g, st);
+    this.drawSmasher(sg, st);
 
     // --- status strip: heat + Bay
     const heatFrac = Math.min(1, c.heat / BAL.heat.max);
@@ -668,6 +773,7 @@ export class ShipScene extends Phaser.Scene {
     g.lineStyle(3, C.hullOutline, 1).strokeRoundedRect(238, ACTION.y, 136, ACTION.h, 23);
     this.setText(this.tx.sell, 306, ACTION.y + ACTION.h / 2, canSell ? `Sell ${ore} Ore` : 'Sell', canSell ? '#0B1020' : T.dim);
     this.setText(this.tx.hp, -100, -100, '');
+    this.drawArrows(g);
   }
 
   private heatColor(f: number): number {
