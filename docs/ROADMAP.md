@@ -5,6 +5,8 @@ Goal (2 weeks): core loop, polished, playable on iPhone 12 / Chrome via GitHub P
 ## Done
 - Day 1: scaffold (Vite, TypeScript, Phaser 3, Vitest), CI + Pages workflow, hull logic (template, unlockable cells, edge rule, tile costs) with 13 tests, buy-tile action, versioned save, style A ship screen with a 1x3 hull that grows tile by tile (procedural silhouette, ghost tiles with costs, engine nozzles), HUD stub, `?debug` panel (+grant, reset).
 
+- Day 1 fix: canvas now renders at device pixel ratio (capped at 3), so text and shapes are sharp on retina phones.
+
 ## Next (Day 2-3: core loop)
 1. Tractor Beam: tap starts a 4 s countdown, asteroid arrives, goes to the 3-slot Bay.
 2. Crusher: weak-point taps (3x), heat, crush stage view, geode, Ore reward.

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { H, ShipScene, W } from './game/ShipScene';
+import { DPR, H, ShipScene, W } from './game/ShipScene';
 
 async function start(): Promise<void> {
   // Wait briefly for the Fredoka font so the first frame uses it.
@@ -14,8 +14,8 @@ async function start(): Promise<void> {
   new Phaser.Game({
     type: Phaser.AUTO,
     parent: 'game',
-    width: W,
-    height: H,
+    width: Math.round(W * DPR),
+    height: Math.round(H * DPR),
     backgroundColor: '#0B1020',
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     render: { antialias: true, roundPixels: false },

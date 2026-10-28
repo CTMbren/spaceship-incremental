@@ -9,6 +9,8 @@ import { C, FONT, T } from './palette';
 
 export const W = 390;
 export const H = 844;
+/** Render at the device pixel ratio (capped) so text and shapes stay sharp on retina phones. */
+export const DPR = Math.min(Math.max(window.devicePixelRatio || 1, 1), 3);
 const TILE = 56;
 const OX = 55; // 5 columns * 56 = 280, centred in 390
 const OY = 150;
@@ -31,11 +33,19 @@ export class ShipScene extends Phaser.Scene {
 
   create(): void {
     this.state = loadFromStorage();
-    this.cameras.main.setBackgroundColor(C.space);
+    const cam = this.cameras.main;
+    cam.setBackgroundColor(C.space);
+    // The canvas is W*DPR x H*DPR; zoom so the 390x844 world fills it exactly.
+    cam.setZoom(DPR);
+    cam.setScroll(-(W * DPR - W) / 2, -(H * DPR - H) / 2);
     this.drawStars();
     this.layer = this.add.container(0, 0);
     this.hud = this.add.container(0, 0);
     this.redraw();
+  }
+
+  private txt(x: number, y: number, text: string, style: Phaser.Types.GameObjects.Text.TextStyle): Phaser.GameObjects.Text {
+    return this.add.text(x, y, text, { ...style, resolution: DPR });
   }
 
   // ---- state -------------------------------------------------------------
@@ -124,7 +134,7 @@ export class ShipScene extends Phaser.Scene {
     const g = this.add.graphics();
     g.fillStyle(color, 1).fillRoundedRect(x + 7, y + 7, TILE - 14, TILE - 14, 8);
     if (outline) g.lineStyle(2, C.beam, 0.9).strokeRoundedRect(x + 7, y + 7, TILE - 14, TILE - 14, 8);
-    const t = this.add.text(x + TILE / 2, y + TILE / 2, label, { fontFamily: FONT, fontSize: '12px', color: T.text }).setOrigin(0.5);
+    const t = this.txt(x + TILE / 2, y + TILE / 2, label, { fontFamily: FONT, fontSize: '12px', color: T.text }).setOrigin(0.5);
     this.layer.add([g, t]);
   }
 
@@ -141,8 +151,8 @@ export class ShipScene extends Phaser.Scene {
       const { x, y } = this.px(c);
       const g = this.add.graphics();
       this.dashedRect(g, x + 3, y + 3, TILE - 6, TILE - 6, ok ? C.crit : C.ghost);
-      const label = this.add
-        .text(x + TILE / 2, y + TILE / 2, String(cost.credits), {
+      const label = this
+        .txt(x + TILE / 2, y + TILE / 2, String(cost.credits), {
           fontFamily: FONT, fontSize: '15px', fontStyle: '600', color: ok ? T.gold : T.dim,
         })
         .setOrigin(0.5);
@@ -176,7 +186,7 @@ export class ShipScene extends Phaser.Scene {
     pill.fillStyle(C.panel, 1).fillRoundedRect(16, 14, 140, 40, 20);
     pill.lineStyle(3, C.panelEdge, 1).strokeRoundedRect(16, 14, 140, 40, 20);
     pill.fillStyle(C.crit, 1).fillCircle(40, 34, 10);
-    const credits = this.add.text(60, 34, String(Math.floor(this.state.credits)), {
+    const credits = this.txt(60, 34, String(Math.floor(this.state.credits)), {
       fontFamily: FONT, fontSize: '22px', fontStyle: '600', color: T.text,
     }).setOrigin(0, 0.5);
 
@@ -186,20 +196,20 @@ export class ShipScene extends Phaser.Scene {
     const chip = this.add.graphics();
     chip.fillStyle(C.panel, 1).fillRoundedRect(16, 66, 358, 44, 22);
     chip.lineStyle(3, C.panelEdge, 1).strokeRoundedRect(16, 66, 358, 44, 22);
-    const chipLabel = this.add.text(W / 2, 88, chipText, {
+    const chipLabel = this.txt(W / 2, 88, chipText, {
       fontFamily: FONT, fontSize: '15px', color: T.text, fixedWidth: 330, align: 'center',
     }).setOrigin(0.5);
 
     this.hud.add([pill, credits, chip, chipLabel]);
 
     if (this.debug) {
-      const dbg = this.add.text(W - 16, 34, '[+grant]', { fontFamily: FONT, fontSize: '16px', color: T.coral })
+      const dbg = this.txt(W - 16, 34, '[+grant]', { fontFamily: FONT, fontSize: '16px', color: T.coral })
         .setOrigin(1, 0.5).setInteractive({ useHandCursor: true });
       dbg.on('pointerup', () => {
         const s = this.state;
         this.apply({ ...s, credits: s.credits + 500, items: Object.fromEntries(Object.entries(s.items).map(([k, v]) => [k, v + 20])) as GameState['items'] });
       });
-      const reset = this.add.text(W - 16, 14, '[reset]', { fontFamily: FONT, fontSize: '12px', color: T.dim })
+      const reset = this.txt(W - 16, 14, '[reset]', { fontFamily: FONT, fontSize: '12px', color: T.dim })
         .setOrigin(1, 0).setInteractive();
       reset.on('pointerup', () => this.apply(createInitialState()));
       this.hud.add([dbg, reset]);
@@ -213,7 +223,7 @@ export class ShipScene extends Phaser.Scene {
     const tab = (cx: number, label: string, active: boolean) => {
       const g = this.add.graphics();
       g.fillStyle(active ? C.beam : C.ghost, active ? 1 : 0.5).fillRoundedRect(cx - 18, H - 70, 36, 28, 10);
-      const t = this.add.text(cx, H - 32, label, { fontFamily: FONT, fontSize: '14px', color: active ? T.text : T.dim }).setOrigin(0.5);
+      const t = this.txt(cx, H - 32, label, { fontFamily: FONT, fontSize: '14px', color: active ? T.text : T.dim }).setOrigin(0.5);
       this.hud.add([g, t]);
     };
     this.hud.add(bar);
@@ -223,7 +233,7 @@ export class ShipScene extends Phaser.Scene {
 
   private showToast(msg: string): void {
     this.toast?.destroy();
-    const t = this.add.text(W / 2, H - 130, msg, {
+    const t = this.txt(W / 2, H - 130, msg, {
       fontFamily: FONT, fontSize: '16px', color: T.text, backgroundColor: '#2B3550', padding: { x: 14, y: 8 },
     }).setOrigin(0.5).setDepth(10);
     this.toast = t;
