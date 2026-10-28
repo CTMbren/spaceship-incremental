@@ -4,7 +4,7 @@ import { chipText as hudChipText, costText, currentGoal } from '../core/goals';
 import { cellKey, nextTileCost, parseKey, unlockableCells } from '../core/hull';
 import {
   bayRoom, canSend, handStats, holdCrush, nextBeamUpgrade, nextHandUpgrade, nextSmasherUpgrade, nextSmelterUpgrade,
-  releaseHold, repairSmasher, sellAll, sellSelected, sellSurplus, sendToSmasher, setHoldForGoal, smasherQueueCap, smasherQueued, tapAllBeams, tapBeam, tapCrush, tick,
+  releaseHold, repairSmasher, sellAll, sellSelected, sellQty, sellSurplus, sendToSmasher, setHoldForGoal, smasherQueueCap, smasherQueued, tapAllBeams, tapBeam, tapCrush, tick,
   toggleSmelter, upgradeBeam, upgradeHand, upgradeSmasher, upgradeSmelter, weakActive,
 } from '../core/loop';
 import { freeCells, freeEdgeCells, isEdgeCell, moduleCost, moduleCount, placeModule } from '../core/modules';
@@ -78,7 +78,7 @@ type SheetRow =
   | { t: 'hold'; label: string; fn: () => void }
   | {
       t: 'cargo'; item: ItemId; count: number; price: number; note: string; sellLabel: string; canSell: boolean;
-      forSale: boolean; ticked: boolean; onTick: () => void; onSell: () => void;
+      forSale: boolean; ticked: boolean; onTick: () => void; onSell: () => void; onSellOne: () => void;
     }
   | { t: 'card'; title: string; sub: string; verb: string; cost: string; can: boolean; fn: () => void };
 
@@ -678,7 +678,7 @@ export class ShipScene extends Phaser.Scene {
   }
 
   private renderSheet(title: string, rows: SheetRow[], footer?: SheetFooter): Phaser.GameObjects.Container {
-    const X = 36, WID = CW - 40, BTN_W = 136, TXT_W = WID - BTN_W - 12, HEAD = 58, BOTTOM = H - 92;
+    const X = 36, WID = CW - 40, BTN_W = 136, TXT_W = WID - BTN_W - 12, HEAD = 58, BOTTOM = footer ? ACTION.y - 8 : H - 92; // a footer sheet ends above the Sell button, so opening it cannot tap its footer
     const FOOT = footer ? 66 : 0;
     const CG_SELL = 88, CG_TXT = WID - 64 - CG_SELL - 8; // Cargo row: tick box + icon, text, Sell button
     const box = this.add.container(0, 0).setDepth(30);
@@ -699,7 +699,7 @@ export class ShipScene extends Phaser.Scene {
       if (row.t === 'cargo') {
         const a = this.txt(X + 64, 0, `${ITEM_LOOK[row.item].name}  x${fmtNum(row.count)}`, { fontFamily: FONT, fontSize: '16px', fontStyle: '600', color: T.text, wordWrap: { width: CG_TXT } });
         const b = this.txt(X + 64, 0, row.note, { fontFamily: FONT, fontSize: '12px', color: T.dim, wordWrap: { width: CG_TXT } });
-        return { row, a, b, h: Math.max(72, a.height + b.height + 24) };
+        return { row, a, b, h: Math.max(80, a.height + b.height + 24) };
       }
       if (row.t === 'switch') {
         const a = this.txt(X, 0, row.title, { fontFamily: FONT, fontSize: '16px', fontStyle: '600', color: T.text, wordWrap: { width: WID - 80 } });
@@ -815,11 +815,22 @@ export class ShipScene extends Phaser.Scene {
         g.lineStyle(2, C.hullOutline, 1).strokeCircle(X + 42, cy, 9);
         l.a!.setY(y + 9);
         l.b!.setY(y + 9 + l.a!.height + 1);
-        const bx = X + WID - CG_SELL, by = cy - 22;
+        // two stacked buttons: Sell 1 on top, Sell all (the whole surplus) below
+        const bx = X + WID - CG_SELL, by = cy - 35, bh = 32;
         const ok = row.forSale && row.canSell;
-        g.fillStyle(ok ? C.crit : C.panelEdge, 1).fillRoundedRect(bx, by, CG_SELL, 44, 16);
-        const lab = this.txt(bx + CG_SELL / 2, cy, row.sellLabel, { fontFamily: FONT, fontSize: '15px', fontStyle: '600', color: ok ? '#0B1020' : T.dim, align: 'center' }).setOrigin(0.5);
-        body.add([g, l.a!, l.b!, lab]);
+        const inkC = ok ? '#0B1020' : T.dim;
+        g.fillStyle(ok ? C.crit : C.panelEdge, 1).fillRoundedRect(bx, by, CG_SELL, bh, 14);
+        g.fillStyle(ok ? C.crit : C.panelEdge, 1).fillRoundedRect(bx, by + bh + 6, CG_SELL, bh, 14);
+        const lab1 = this.txt(bx + CG_SELL / 2, by + bh / 2, row.forSale ? 'Sell 1' : 'Keep', { fontFamily: FONT, fontSize: '15px', fontStyle: '600', color: inkC, align: 'center' }).setOrigin(0.5);
+        const lab = this.txt(bx + CG_SELL / 2, by + bh + 6 + bh / 2, row.sellLabel, { fontFamily: FONT, fontSize: '15px', fontStyle: '600', color: inkC, align: 'center' }).setOrigin(0.5);
+        body.add([g, l.a!, l.b!, lab1, lab]);
+        if (row.forSale) {
+          const oz = this.add.zone(bx + CG_SELL / 2, by + bh / 2, CG_SELL, bh + 4).setInteractive();
+          oz.on('pointerdown', begin);
+          oz.on('pointerup', (p: Phaser.Input.Pointer) => { if (tapOk(p) && ok) row.onSellOne(); });
+          zones.push({ z: oz, top: by, bottom: by + bh });
+          body.add(oz);
+        }
         if (row.forSale) {
           const tz = this.add.zone(X + 13, cy, 44, 56).setInteractive();
           tz.on('pointerdown', begin);
@@ -827,10 +838,10 @@ export class ShipScene extends Phaser.Scene {
           zones.push({ z: tz, top: cy - 28, bottom: cy + 28 });
           body.add(tz);
         }
-        const sz = this.add.zone(bx + CG_SELL / 2, cy, CG_SELL, 44).setInteractive();
+        const sz = this.add.zone(bx + CG_SELL / 2, by + bh + 6 + bh / 2, CG_SELL, bh + 4).setInteractive();
         sz.on('pointerdown', begin);
         sz.on('pointerup', (p: Phaser.Input.Pointer) => { if (tapOk(p) && ok) row.onSell(); });
-        zones.push({ z: sz, top: by, bottom: by + 44 });
+        zones.push({ z: sz, top: by + bh + 6, bottom: by + 2 * bh + 6 });
         body.add(sz);
       } else if (l.row.t === 'hold') {
         // hold-to-confirm: the fill grows while the finger stays down; letting go cancels
@@ -910,7 +921,10 @@ export class ShipScene extends Phaser.Scene {
       fg.lineStyle(3, C.hullOutline, 1).strokeRoundedRect(X, fy, WID, 46, 23);
       const fl = this.txt(W / 2, fy + 23, footer.label, { fontFamily: FONT, fontSize: '18px', fontStyle: '600', color: footer.can ? '#0B1020' : T.dim }).setOrigin(0.5);
       const fz = this.add.zone(W / 2, fy + 23, WID, 46).setInteractive();
-      fz.on('pointerup', () => { if (footer.can) footer.fn(); });
+      let pressed = false; // only a press that started on the footer counts (the finger that opened the sheet must not)
+      fz.on('pointerdown', () => { pressed = true; });
+      fz.on('pointerout', () => { pressed = false; });
+      fz.on('pointerup', () => { if (pressed && footer.can) footer.fn(); pressed = false; });
       box.add([fg, fl, fz]);
     }
     return box;
@@ -1194,9 +1208,16 @@ export class ShipScene extends Phaser.Scene {
         rows.push({
           t: 'cargo', item: r.item, count: r.count, price: r.price, note, forSale: r.forSale,
           ticked: !this.cargoOff.has(r.item), canSell: r.surplus > 0,
-          sellLabel: !r.forSale ? 'Keep' : r.surplus > 0 ? `Sell ${fmtNum(r.surplus)}` : 'Sell',
+          sellLabel: !r.forSale ? 'Not for sale' : r.surplus > 0 ? `Sell ${fmtNum(r.surplus)}` : 'Sell',
           onTick: () => {
             if (this.cargoOff.has(r.item)) this.cargoOff.delete(r.item); else this.cargoOff.add(r.item);
+            this.refreshSheet();
+          },
+          onSellOne: () => {
+            const out = sellQty(this.state, r.item, 1);
+            if (out.state === this.state) return;
+            this.apply(out.state);
+            this.floatSold(out.events);
             this.refreshSheet();
           },
           onSell: () => {

@@ -205,3 +205,20 @@ describe('goal chip after the tutorial', () => {
     expect(chipText(s)).not.toMatch(/Expand/);
   });
 });
+
+describe('sell a few', () => {
+  it('sellQty sells at most the surplus, keeps the goal reserve, and is a no-op for nothing or Shards', async () => {
+    const { sellQty } = await import('../src/core/loop');
+    const s0 = createInitialState();
+    const s = { ...s0, stats: { ...s0.stats, sold: 3, rocks: 5 }, flags: { ...s0.flags, holdForGoal: false }, items: { ...s0.items, ore: 12, core_shard: 2 } };
+    const one = sellQty(s, 'ore', 1);
+    expect(one.state.items.ore).toBe(11);
+    expect(one.state.credits).toBe(s.credits + PRICES.ore);
+    expect(one.events[0]).toMatchObject({ kind: 'sold', item: 'ore', qty: 1 });
+    expect(sellQty(s, 'ore', 50).state.items.ore).toBe(0);
+    expect(sellQty(s, 'ore', 0).state).toBe(s);
+    expect(sellQty(s, 'core_shard', 1).state).toBe(s);
+    const held = { ...s, flags: { ...s.flags, holdForGoal: true } }; // the goal keeps Ore back, so nothing is sellable
+    expect(sellQty(held, 'ore', 1).state).toBe(held);
+  });
+});

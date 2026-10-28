@@ -395,6 +395,19 @@ export const sellAll = (state: GameState): Outcome => sellSelected(state, SELLAB
 /** One Cargo row's Sell button. */
 export const sellSurplus = (state: GameState, item: ItemId): Outcome => sellSelected(state, [item]);
 
+/** Sell up to `qty` units of one item (never more than the sellable surplus), e.g. the Cargo row's Sell 1. */
+export function sellQty(state: GameState, item: ItemId, qty: number): Outcome {
+  if (!SELLABLE.includes(item)) return { state, events: [] };
+  const n = Math.min(Math.floor(qty), availableQty(state, item));
+  if (n <= 0) return { state, events: [] };
+  const s = clone(state);
+  const credits = n * PRICES[item];
+  s.items[item] -= n;
+  s.credits += credits;
+  s.stats.sold += n;
+  return { state: s, events: [{ kind: 'sold', item, qty: n, credits }] };
+}
+
 /** The Cargo sheet switch: keep back what the current goal needs (on) or let the player sell it (off). */
 export function setHoldForGoal(state: GameState, on: boolean): Outcome {
   if (state.flags.holdForGoal === on) return { state, events: [] };
