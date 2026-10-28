@@ -114,14 +114,14 @@ Base leg times at Engine L1: 6, 10, 8, 8, 8 minutes. You choose when to leave, s
 
 - Runs while you do other things; finishes offline too (collect on return with a reveal animation).
 - **Ping (active bonus):** at times a gold ping appears on the Rover panel; tap it in the window for a Rare Crate (the weak-point idea, applied to exploration). Missing it costs nothing, and offline runs never get it.
-- **Finite per planet:** each Site has 5 expeditions of stock; then it reads "Surveyed". New planets arrive with each system, so rare items are bounded and Jumping has a reason. Total for Veda: about 15 expeditions, roughly 2 to 3 Core Shards, 6 to 8 Relics.
+- **Renewable sites (Brendan's decision, Oct 27):** sites never run out, so the Rover is always something to do at a planet. Rare items are kept in check by rules instead of stock: (a) one Rover, one trip at a time, so the trip time is the throttle; (b) a hidden **pity counter** on Ruins gives a guaranteed Core Shard every 6th Ruins trip (base chance 5%), and a Relic every 2nd trip; (c) common goods scale linearly with trips; (d) offline the Rover completes **one** trip and parks (a Flux perk adds one repeat per level, cap 3), so leaving the game overnight cannot farm 30 trips. At base speed one Shard costs about 90 minutes of Ruins trips, which stays below the geode supply so Shards remain a milestone, not a faucet.
 - **No fail:** a dust storm may slow a run (flavour), never lose the Rover or the haul.
 
 **Planet goods (system-specific, 2 per planet):** Veda gives Glass Sand and Amber Resin. They are used for Shock Dampers, Cargo Hold, Dry Dock steps and tier-2 module upgrades, so a planet visit changes what your ship can become, and each system's goods differ.
 
 **Rover vs the old Salvage Drone Bay idea:** the drone is on-ship automation (post-MVP); the Rover is an away mission. Different verbs; keep both.
 
-**Tests/sim:** an expedition's yield is a pure function of site, loadout and seed; stock decrements once; offline completion equals online; Recall returns 50%; shard expectation per planet within 2 to 3.
+**Tests/sim:** an expedition's yield is a pure function of site, loadout and seed; pity counter advances and resets exactly once per Ruins trip; offline completion equals online and completes only one trip without the repeat perk; Recall returns 50%; expected Core Shards per 90 minutes of Rover time within 1 to 1.3.
 
 ---
 
@@ -131,7 +131,7 @@ Base leg times at Engine L1: 6, 10, 8, 8, 8 minutes. You choose when to leave, s
 
 1. **Workshop** (Build tab, always open): **Hand Tools** (your skill upgrades: crit window, heat cap, cooling rate, hold delay, tap damage; credits, cost base x1/x3/x9), **Bay** slots 3 to 6, and the list of modules you can build. Module levels stay in each module's detail sheet (the no-global-Upgrades-tab rule stands).
 2. **Station Trader** (at Outposts/Stations): fixed stock per node (seeded, no timers, nothing expires). Sells new module blueprints, **Dry Dock** hull conversions, Jump parts and a paint swatch per planet (cosmetic, earned, not IAP-only). Pays with credits plus planet goods. Sells refined goods at +20% while docked.
-3. **Flux Exchange** (Map tab, after Jump 1): 8 to 10 permanent perks with escalating costs and caps: +1 free Brace, start with Smasher L2, Hand Tool floors, offline cap +1 h, Rover +1 stock per Site, travel -5%, then +income steps.
+3. **Flux Exchange** (Map tab, after Jump 1): 8 to 10 permanent perks with escalating costs and caps: +1 free Brace, start with Smasher L2, Hand Tool floors, offline cap +1 h, Rover repeat +1 trip offline (cap 3), travel -5%, then +income steps.
 
 **Hull across Jumps:** the hull persists, so growth is by **Dry Dock** conversion: Tug (18 cells) to Hauler (28 cells, a superset of the Tug) at Station Halcyon, then Cruiser (38) in system 2. Templates nest, so no module is ever lost to a bigger hull. Jump no longer requires a full hull.
 
@@ -165,14 +165,14 @@ Base leg times at Engine L1: 6, 10, 8, 8, 8 minutes. You choose when to leave, s
 | Grapple at min 9, Ice from heavy rocks anywhere | Heavy rocks and Ice only from the Belt on; Grapple unlock follows arrival (about min 13) |
 | First hour = 60 min active | System 1 = about 75 to 80 min active; casual players take about 1.4x |
 | Offline: tiers 30/10 % to 8 h | Unchanged for income; **travel and Rover progress run at 100%** inside the same 8 h cap |
-| Shard demand 3 per hour | Demand adds 1 per Jump; supply adds Rover Ruins (2 to 3 per planet) |
+| Shard demand 3 per hour | Demand adds 1 per Jump; supply adds Rover Ruins (pity: one Shard per 6th trip) |
 | Salvage Drone Bay (post-MVP) | Kept, separate from the Rover |
 
 ## 6. Economy and pacing notes (to verify in the sim port)
 
 - Tile and module costs are unchanged; hand-crack time rose in Patch 4.1, so the Smasher plus travel carry idle pace.
 - New spend: Engine 12 Plate, Rover Bay 14 Plate + 6 Circuit, attachments 4 to 10 Plate/goods each, Dry Dock Hauler about 2,500 credits + planet goods, Jump 1 Shard + 5 Circuit, Hand Tools base 40 credits.
-- Sim targets: System 1 active finish 75 to 85 min; casual 105 to 120; Rover 2 to 3 Shards per planet; Jump gives about 3 to 4 Flux; system 2 first run 50 to 60 min.
+- Sim targets: System 1 active finish 75 to 85 min; casual 105 to 120; Rover about 1 Shard per 6 Ruins trips (90 min of Rover time); Jump gives about 3 to 4 Flux; system 2 first run 50 to 60 min.
 - Strain and Brace need a sim pass for how many levels players lose on average with two braces (target: 25% to 40% of total levels).
 
 ## 7. Proposed build order (supersedes the days after Day 4)
@@ -196,13 +196,14 @@ Base leg times at Engine L1: 6, 10, 8, 8, 8 minutes. You choose when to leave, s
 - **Tile pressure** may punish: watch playtest quotes, raise the Tug to 20.
 - **Rule overload:** one new rule per about 10 minutes. Travel (min 6), Rover (min 44), Jump (min 75) fit that.
 - **Damage feels like loss:** mitigated by the preview, free braces, cheap repair and the Never-Below-L1 rule.
+- **Unlimited Rover trips could flood rare items:** pity rate, one trip at a time and one offline trip cap the supply; watch Shards per hour in playtest and slow the pity to every 8th trip if it exceeds the geode supply.
 - **Offline travel skips content:** gates (Jump Drive, shards, tiles) keep the pace; arrival alone never completes a system.
 
-## 9. Open decisions for Brendan (recommended answers first)
+## 9. Decisions (Brendan, Oct 27: 1-4 yes, 5 no, 6 decide after the latest playtest)
 
 1. Hull persists across Jumps and grows by Dry Dock. **Yes** (matches modules breaking instead of resetting).
 2. Materials persist across Jump; credits reset to the Dividend. **Yes.**
 3. Spatial shockwave with Braces and Dampers, not random breakage. **Yes.**
 4. Travel and Rover run offline at full speed inside the 8 h cap. **Yes.**
-5. Rover sites are finite per planet (5 trips each). **Yes**, new planets come with new systems.
-6. Commit to Days 8 to 12 now, or decide after the Day 7 playtest. **After the playtest.**
+5. Rover sites are finite per planet. **No**, sites are renewable; rare items are limited by the pity rule and trip time instead.
+6. Commit to Days 8 to 12 now, or decide after the Day 7 playtest. **Decide after the latest playtest** (Brendan's call; Day 5 to 7 come first).

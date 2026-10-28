@@ -31,7 +31,7 @@ Travel along a system route (Engine, nodes, offline travel), Rover expeditions a
 - Layout: hull in the upper half, crush stage panel, Heat + Bay strip, Fire and Sell buttons, tab bar (Build tab is a stub).
 
 ## Open decisions
-- Milestone 2 decisions (hull persists, materials persist, spatial shockwave, offline travel, finite rover sites, when to commit): see section 9 of the travel/rover/Jump plan.
+- Milestone 2 decided Oct 27: hull persists, materials persist, spatial shockwave with Braces, travel and Rover run offline, Rover sites are renewable (limited by a pity rule, not stock). Still open: whether to commit to Days 8-12, decided after the latest playtest. See section 9 of the travel/rover/Jump plan.
 - Decided on Day 2-3: the rock appears in a stage panel under the ship (below the hull, above the Fire button).
 - Bay upgrade costs (not covered by the sim).
 - Title: "Last Tug: Idle Salvage" provisional.
