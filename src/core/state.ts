@@ -1,16 +1,24 @@
+import { BAL } from '../data/balance';
 import { HULL_TUG } from '../data/hulls';
 import { cellKey } from './hull';
 import type { GameState, ItemId } from './types';
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 export const ITEM_IDS: readonly ItemId[] = ['ore', 'ice', 'plate', 'coolant', 'circuit', 'core_shard'];
 
-export function createInitialState(): GameState {
+export function createInitialState(seed = 1): GameState {
   const items = Object.fromEntries(ITEM_IDS.map((i) => [i, 0])) as Record<ItemId, number>;
   return {
     version: SAVE_VERSION,
-    credits: 120,
+    credits: BAL.startCredits,
     items,
     ship: { hullId: HULL_TUG.id, ownedCells: HULL_TUG.startCells.map(cellKey) },
+    rng: seed,
+    beams: [{ status: 'idle', remaining: 0 }],
+    bay: [],
+    crusher: { rock: null, heat: 0, lockout: 0, weakT: 0, weakX: 0, weakY: 0 },
+    stats: { rocks: 0, geodes: 0, sold: 0, taps: 0 },
+    pity: 0,
+    flags: { tappedBeam: false },
   };
 }

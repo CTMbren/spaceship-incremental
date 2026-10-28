@@ -1,9 +1,12 @@
 import Phaser from 'phaser';
 import { buyTile, canAfford } from '../core/actions';
+import { currentGoal } from '../core/goals';
 import { cellKey, nextTileCost, parseKey, unlockableCells } from '../core/hull';
+import { sell, tapBeam, tapCrush, tick, weakActive } from '../core/loop';
 import { loadFromStorage, saveToStorage } from '../core/save';
 import { createInitialState } from '../core/state';
-import type { Cell, Cost, GameState } from '../core/types';
+import type { Cell, Cost, GameEvent, GameState } from '../core/types';
+import { BAL } from '../data/balance';
 import { HULLS } from '../data/hulls';
 import { C, FONT, T } from './palette';
 
@@ -15,6 +18,9 @@ const TILE = 56;
 const OX = 55; // 5 columns * 56 = 280, centred in 390
 const OY = 150;
 const MAX_GHOSTS = 4;
+const STAGE = { x: 16, y: 466, w: 358, h: 184, cx: 195, cy: 556, r: 60 };
+const STRIP_Y = 660;
+const ACTION = { y: 706, h: 46 };
 
 const ITEM_LABEL: Record<string, string> = {
   ore: 'Ore', ice: 'Ice', plate: 'Plate', coolant: 'Coolant', circuit: 'Circuit', core_shard: 'Shard',
@@ -26,6 +32,12 @@ export class ShipScene extends Phaser.Scene {
   private hud!: Phaser.GameObjects.Container;
   private toast?: Phaser.GameObjects.Text;
   private debug = new URLSearchParams(window.location.search).has('debug');
+  private dyn!: Phaser.GameObjects.Graphics;
+  private tx!: Record<'stage' | 'fire' | 'sell' | 'beam' | 'heat' | 'bay' | 'hp', Phaser.GameObjects.Text>;
+  private forceGeode = false;
+  private shake = 0;
+  private saveTimer = 0;
+  private elapsed = 0;
 
   constructor() {
     super('Ship');
@@ -41,7 +53,26 @@ export class ShipScene extends Phaser.Scene {
     this.drawStars();
     this.layer = this.add.container(0, 0);
     this.hud = this.add.container(0, 0);
+    this.buildDynamic();
     this.redraw();
+    if (this.debug) (window as unknown as { __ship: ShipScene }).__ship = this; // for scripted tests
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) saveToStorage(this.state);
+    });
+  }
+
+  update(_time: number, delta: number): void {
+    const dt = Math.min(delta / 1000, 0.25); // long gaps are offline progress (Day 4), not one big tick
+    this.elapsed += dt;
+    const out = tick(this.state, dt, this.forceGeode);
+    this.state = out.state;
+    this.handleEvents(out.events, W / 2, STAGE.cy);
+    this.saveTimer += dt;
+    if (this.saveTimer > 5) {
+      this.saveTimer = 0;
+      saveToStorage(this.state);
+    }
+    this.drawDynamic();
   }
 
   private txt(x: number, y: number, text: string, style: Phaser.Types.GameObjects.Text.TextStyle): Phaser.GameObjects.Text {
@@ -123,7 +154,11 @@ export class ShipScene extends Phaser.Scene {
     }
 
     // Day 1 placeholder modules on the 1x3 start: beam, crusher, empty smelter slot
-    this.placeholder(owned, { x: 2, y: 0 }, C.beamDeep, 'Beam');
+    this.placeholder(owned, { x: 2, y: 0 }, C.beamDeep, '');
+    const bp = this.px({ x: 2, y: 0 });
+    const beamHit = this.add.zone(bp.x + TILE / 2, bp.y + TILE / 2, TILE, TILE).setInteractive();
+    beamHit.on('pointerdown', () => this.onBeamTap());
+    this.layer.add(beamHit);
     this.placeholder(owned, { x: 2, y: 1 }, C.crusher, 'Crush');
     this.placeholder(owned, { x: 2, y: 2 }, 0x18223f, 'Open', true);
   }
@@ -182,37 +217,69 @@ export class ShipScene extends Phaser.Scene {
   }
 
   private drawHud(): void {
+    const st = this.state;
     const pill = this.add.graphics();
     pill.fillStyle(C.panel, 1).fillRoundedRect(16, 14, 140, 40, 20);
     pill.lineStyle(3, C.panelEdge, 1).strokeRoundedRect(16, 14, 140, 40, 20);
     pill.fillStyle(C.crit, 1).fillCircle(40, 34, 10);
-    const credits = this.txt(60, 34, String(Math.floor(this.state.credits)), {
+    const credits = this.txt(60, 34, String(Math.floor(st.credits)), {
       fontFamily: FONT, fontSize: '22px', fontStyle: '600', color: T.text,
     }).setOrigin(0, 0.5);
+    this.hud.add([pill, credits]);
 
-    const def = HULLS[this.state.ship.hullId];
-    const next = nextTileCost(def, this.state.ship.ownedCells.length);
-    const chipText = next ? `Next: Expand hull · ${this.costText(next)}` : 'Hull complete';
+    // Ore pill appears after the first rock (progressive reveal)
+    if (st.stats.rocks > 0 || st.items.ore > 0) {
+      const o = this.add.graphics();
+      o.fillStyle(C.panel, 1).fillRoundedRect(166, 14, 104, 40, 20);
+      o.lineStyle(3, C.panelEdge, 1).strokeRoundedRect(166, 14, 104, 40, 20);
+      o.fillStyle(0xa9937c, 1).fillCircle(190, 34, 9);
+      const ore = this.txt(206, 34, String(Math.floor(st.items.ore)), {
+        fontFamily: FONT, fontSize: '22px', fontStyle: '600', color: T.text,
+      }).setOrigin(0, 0.5);
+      this.hud.add([o, ore]);
+    }
+
+    const def = HULLS[st.ship.hullId];
+    const next = nextTileCost(def, st.ship.ownedCells.length);
+    const goal = currentGoal(st);
+    const chipText = goal
+      ? `Next: ${goal.text}`
+      : next ? `Next: Expand hull · ${this.costText(next)}` : 'Hull complete';
     const chip = this.add.graphics();
     chip.fillStyle(C.panel, 1).fillRoundedRect(16, 66, 358, 44, 22);
-    chip.lineStyle(3, C.panelEdge, 1).strokeRoundedRect(16, 66, 358, 44, 22);
+    chip.lineStyle(3, goal ? C.crit : C.panelEdge, 1).strokeRoundedRect(16, 66, 358, 44, 22);
     const chipLabel = this.txt(W / 2, 88, chipText, {
       fontFamily: FONT, fontSize: '15px', color: T.text, fixedWidth: 330, align: 'center',
     }).setOrigin(0.5);
+    this.hud.add([chip, chipLabel]);
 
-    this.hud.add([pill, credits, chip, chipLabel]);
+    if (!st.flags.tappedBeam) {
+      const bx = OX + 2 * TILE + TILE / 2;
+      const b = this.add.graphics();
+      b.fillStyle(C.highlight, 1).fillRoundedRect(bx - 62, 116, 124, 26, 13);
+      b.fillTriangle(bx - 7, 141, bx + 7, 141, bx, 149);
+      const bt = this.txt(bx, 129, 'Tap the beam.', { fontFamily: FONT, fontSize: '14px', fontStyle: '600', color: '#0B1020' }).setOrigin(0.5);
+      this.hud.add([b, bt]);
+    }
 
     if (this.debug) {
-      const dbg = this.txt(W - 16, 34, '[+grant]', { fontFamily: FONT, fontSize: '16px', color: T.coral })
-        .setOrigin(1, 0.5).setInteractive({ useHandCursor: true });
-      dbg.on('pointerup', () => {
+      const mk = (x: number, label: string, fn: () => void) => {
+        const t = this.txt(x, 436, label, { fontFamily: FONT, fontSize: '13px', color: T.coral })
+          .setOrigin(0.5, 0).setInteractive();
+        t.on('pointerup', fn);
+        this.hud.add(t);
+      };
+      mk(52, '[+grant]', () => {
         const s = this.state;
         this.apply({ ...s, credits: s.credits + 500, items: Object.fromEntries(Object.entries(s.items).map(([k, v]) => [k, v + 20])) as GameState['items'] });
       });
-      const reset = this.txt(W - 16, 14, '[reset]', { fontFamily: FONT, fontSize: '12px', color: T.dim })
-        .setOrigin(1, 0).setInteractive();
-      reset.on('pointerup', () => this.apply(createInitialState()));
-      this.hud.add([dbg, reset]);
+      mk(140, '[+60s]', () => {
+        let cur = this.state;
+        for (let i = 0; i < 600; i++) cur = tick(cur, 0.1, this.forceGeode).state;
+        this.apply(cur);
+      });
+      mk(246, this.forceGeode ? '[geodes ON]' : '[geodes off]', () => { this.forceGeode = !this.forceGeode; this.redraw(); });
+      mk(340, '[reset]', () => this.apply(createInitialState()));
     }
   }
 
@@ -238,6 +305,225 @@ export class ShipScene extends Phaser.Scene {
     }).setOrigin(0.5).setDepth(10);
     this.toast = t;
     this.tweens.add({ targets: t, alpha: 0, delay: 1400, duration: 300, onComplete: () => t.destroy() });
+  }
+
+  // ---- interaction ---------------------------------------------------------
+  private onBeamTap(): void {
+    const out = tapBeam(this.state);
+    if (out.state === this.state) return;
+    this.apply(out.state);
+    this.floatText(OX + 2 * TILE + TILE / 2, OY - 6, 'Beam on', T.gold);
+  }
+
+  private onStageDown(p: Phaser.Input.Pointer): void {
+    const c = this.state.crusher;
+    if (!c.rock) return;
+    const nx = (p.worldX - STAGE.cx) / STAGE.r;
+    const ny = (p.worldY - STAGE.cy) / STAGE.r;
+    const out = tapCrush(this.state, nx, ny);
+    if (out.state === this.state) {
+      if (c.lockout > 0) this.shake = 0.5;
+      return;
+    }
+    this.state = out.state;
+    this.handleEvents(out.events, p.worldX, p.worldY);
+    if (out.events.some((e) => e.kind === 'crushed')) this.redraw(); // credits and Ore changed
+  }
+
+  private onSell(): void {
+    const out = sell(this.state, 'ore');
+    if (out.state === this.state) {
+      this.showToast('No Ore to sell');
+      return;
+    }
+    this.apply(out.state);
+    for (const e of out.events) {
+      if (e.kind === 'sold') this.floatText(W - 90, ACTION.y - 6, `+${e.credits}`, T.gold);
+    }
+  }
+
+  private handleEvents(events: GameEvent[], x: number, y: number): void {
+    for (const e of events) {
+      switch (e.kind) {
+        case 'hit':
+          this.shake = e.crit ? 1 : 0.45;
+          this.chips(x, y, e.crit ? C.crit : 0xc8bdb2, e.crit ? 10 : 5);
+          if (e.crit) this.floatText(x, y - 20, '3x', T.gold);
+          break;
+        case 'overheat':
+          this.floatText(STAGE.cx, STAGE.y + 24, 'Overheated!', T.coral);
+          break;
+        case 'crushed':
+          this.floatText(STAGE.cx, STAGE.cy - 40, `+${e.ore} Ore`, T.text);
+          if (e.geode) {
+            this.floatText(STAGE.cx, STAGE.cy - 70, `Jackpot +${e.credits}`, T.gold);
+            this.chips(STAGE.cx, STAGE.cy, C.crit, 22);
+          }
+          if (e.shard) this.floatText(STAGE.cx, STAGE.cy - 96, 'Core Shard!', '#8A5CE0');
+          break;
+        case 'rock_arrived':
+          this.chips(STAGE.cx, STAGE.y + 10, C.beam, 8);
+          break;
+        default:
+          break;
+      }
+    }
+  }
+
+  private chips(x: number, y: number, color: number, n: number): void {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const d = 18 + Math.random() * 40;
+      const dot = this.add.circle(x, y, 2 + Math.random() * 3, color).setDepth(20);
+      this.tweens.add({
+        targets: dot, x: x + Math.cos(a) * d, y: y + Math.sin(a) * d, alpha: 0, duration: 320 + Math.random() * 200,
+        onComplete: () => dot.destroy(),
+      });
+    }
+  }
+
+  private floatText(x: number, y: number, msg: string, color: string): void {
+    const t = this.txt(x, y, msg, { fontFamily: FONT, fontSize: '18px', fontStyle: '600', color, stroke: '#0B1020', strokeThickness: 4 })
+      .setOrigin(0.5).setDepth(21);
+    this.tweens.add({ targets: t, y: y - 34, alpha: 0, duration: 900, ease: 'Cubic.easeOut', onComplete: () => t.destroy() });
+  }
+
+  // ---- dynamic layer (redrawn every frame) -----------------------------------
+  private buildDynamic(): void {
+    this.dyn = this.add.graphics().setDepth(5);
+    const mk = (size: number, color: string = T.text) =>
+      this.txt(0, 0, '', { fontFamily: FONT, fontSize: `${size}px`, fontStyle: '600', color, align: 'center' }).setOrigin(0.5).setDepth(6);
+    this.tx = { stage: mk(15, T.dim), fire: mk(17), sell: mk(17, '#0B1020'), beam: mk(17), heat: mk(12, T.dim), bay: mk(12, T.dim), hp: mk(12, T.dim) };
+
+    const stage = this.add.zone(STAGE.x + STAGE.w / 2, STAGE.y + STAGE.h / 2, STAGE.w, STAGE.h).setInteractive();
+    stage.on('pointerdown', (p: Phaser.Input.Pointer) => this.onStageDown(p));
+    const fire = this.add.zone(16 + 105, ACTION.y + ACTION.h / 2, 210, ACTION.h).setInteractive();
+    fire.on('pointerdown', () => this.onBeamTap());
+    const sellZ = this.add.zone(238 + 68, ACTION.y + ACTION.h / 2, 136, ACTION.h).setInteractive();
+    sellZ.on('pointerdown', () => this.onSell());
+  }
+
+  private setText(t: Phaser.GameObjects.Text, x: number, y: number, str: string, color?: string): void {
+    if (t.text !== str) t.setText(str);
+    if (color && t.style.color !== color) t.setColor(color);
+    t.setPosition(x, y);
+    t.setVisible(str !== '');
+  }
+
+  private drawDynamic(): void {
+    const g = this.dyn;
+    const st = this.state;
+    const c = st.crusher;
+    const beam = st.beams[0];
+    const now = this.elapsed;
+    g.clear();
+
+    // --- beam tile overlay (ring + countdown)
+    const bp = this.px({ x: 2, y: 0 });
+    const bcx = bp.x + TILE / 2, bcy = bp.y + TILE / 2;
+    let beamLabel = '';
+    if (beam.status === 'counting') {
+      const frac = 1 - beam.remaining / BAL.beamCountdown;
+      g.lineStyle(4, C.beam, 1).beginPath().arc(bcx, bcy, 18, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac, false).strokePath();
+      g.lineStyle(4, C.hull, 0.35).strokeCircle(bcx, bcy, 18);
+      beamLabel = String(Math.ceil(Math.max(0, beam.remaining)));
+    } else if (beam.status === 'idle') {
+      const pulse = 0.55 + 0.45 * Math.sin(now * 5);
+      g.lineStyle(3, C.crit, st.flags.tappedBeam ? 0.9 : pulse).strokeRoundedRect(bp.x + 2, bp.y + 2, TILE - 4, TILE - 4, 10);
+      beamLabel = st.flags.tappedBeam ? '' : '';
+    } else {
+      g.lineStyle(3, 0xffa733, 1).strokeRoundedRect(bp.x + 2, bp.y + 2, TILE - 4, TILE - 4, 10);
+      beamLabel = 'Full';
+    }
+    this.setText(this.tx.beam, bcx, bcy, beamLabel);
+
+    // --- crush stage panel
+    g.fillStyle(C.panel, 1).fillRoundedRect(STAGE.x, STAGE.y, STAGE.w, STAGE.h, 22);
+    g.lineStyle(3, C.panelEdge, 1).strokeRoundedRect(STAGE.x, STAGE.y, STAGE.w, STAGE.h, 22);
+
+    let stageText = '';
+    if (c.rock) {
+      this.shake = Math.max(0, this.shake - 0.06);
+      const jx = (Math.random() - 0.5) * 8 * this.shake;
+      const jy = (Math.random() - 0.5) * 8 * this.shake;
+      this.drawRock(g, STAGE.cx + jx, STAGE.cy + jy, c.rock.geode, 1 - c.rock.hp / c.rock.maxHp);
+      if (weakActive(st)) {
+        const wx = STAGE.cx + c.weakX * STAGE.r, wy = STAGE.cy + c.weakY * STAGE.r;
+        const left = 1 - c.weakT / BAL.weak.active;
+        const pr = BAL.weak.hitRadius * STAGE.r;
+        g.fillStyle(C.crit, 0.22).fillCircle(wx, wy, pr);
+        g.lineStyle(4, C.crit, 1).strokeCircle(wx, wy, pr * (0.7 + 0.3 * left));
+        g.fillStyle(C.crit, 1).fillCircle(wx, wy, 6);
+      }
+      // HP bar
+      const frac = Math.max(0, c.rock.hp / c.rock.maxHp);
+      g.fillStyle(C.deck, 1).fillRoundedRect(STAGE.cx - 70, STAGE.y + STAGE.h - 22, 140, 10, 5);
+      g.fillStyle(C.crusher, 1).fillRoundedRect(STAGE.cx - 70, STAGE.y + STAGE.h - 22, 140 * frac, 10, 5);
+      if (c.lockout > 0) stageText = 'Overheated!';
+      else if (st.stats.rocks === 0) stageText = 'Tap the rock. Hit the glow for 3x.';
+    } else if (beam.status === 'counting') {
+      stageText = 'Asteroid incoming...';
+    } else {
+      stageText = st.flags.tappedBeam ? 'Tap the beam for another asteroid' : 'Tap the beam to call an asteroid';
+    }
+    this.setText(this.tx.stage, STAGE.cx, c.rock ? STAGE.y + 20 : STAGE.cy, stageText, c.lockout > 0 ? T.coral : T.dim);
+
+    // --- status strip: heat + Bay
+    const heatFrac = Math.min(1, c.heat / BAL.heat.max);
+    const hx = 16, hy = STRIP_Y + 18, hw = 176;
+    g.fillStyle(C.deck, 1).fillRoundedRect(hx, hy, hw, 16, 8);
+    const hc = c.lockout > 0 ? C.coral : heatFrac > 0.7 ? C.crusher : heatFrac > 0.4 ? C.crit : C.beam;
+    if (heatFrac > 0) g.fillStyle(hc, 1).fillRoundedRect(hx, hy, Math.max(16, hw * heatFrac), 16, 8);
+    this.setText(this.tx.heat, hx + 18, STRIP_Y + 8, 'Heat');
+    this.setText(this.tx.bay, 224, STRIP_Y + 26, 'Bay');
+    for (let i = 0; i < BAL.baySlots; i++) {
+      const sx = 250 + i * 40, sy = STRIP_Y + 6;
+      g.fillStyle(C.deck, 1).fillRoundedRect(sx, sy, 30, 30, 9);
+      g.lineStyle(2, C.deckEdge, 1).strokeRoundedRect(sx, sy, 30, 30, 9);
+      const rock = st.bay[i];
+      if (rock) g.fillStyle(rock.geode ? 0x8a5ce0 : 0xa9937c, 1).fillCircle(sx + 15, sy + 15, 9);
+    }
+
+    // --- action row: Fire + Sell
+    const ready = beam.status === 'idle';
+    g.fillStyle(ready ? C.beamDeep : C.panelEdge, 1).fillRoundedRect(16, ACTION.y, 210, ACTION.h, 23);
+    g.lineStyle(3, C.hullOutline, 1).strokeRoundedRect(16, ACTION.y, 210, ACTION.h, 23);
+    const fireText = beam.status === 'idle' ? 'Fire beam' : beam.status === 'counting' ? `Incoming ${Math.max(0, beam.remaining).toFixed(1)}s` : 'Bay full';
+    this.setText(this.tx.fire, 121, ACTION.y + ACTION.h / 2, fireText, ready ? '#0B1020' : T.dim);
+
+    const ore = Math.floor(st.items.ore);
+    const canSell = ore > 0;
+    const sellPulse = canSell && currentGoal(st)?.id === 'sell' ? 0.6 + 0.4 * Math.sin(now * 6) : 1;
+    g.fillStyle(canSell ? C.crit : C.panelEdge, canSell ? sellPulse : 1).fillRoundedRect(238, ACTION.y, 136, ACTION.h, 23);
+    g.lineStyle(3, C.hullOutline, 1).strokeRoundedRect(238, ACTION.y, 136, ACTION.h, 23);
+    this.setText(this.tx.sell, 306, ACTION.y + ACTION.h / 2, canSell ? `Sell ${ore} Ore` : 'Sell', canSell ? '#0B1020' : T.dim);
+    this.setText(this.tx.hp, -100, -100, '');
+  }
+
+  private drawRock(g: Phaser.GameObjects.Graphics, cx: number, cy: number, geode: boolean, damage: number): void {
+    const R = STAGE.r;
+    const pts: Phaser.Math.Vector2[] = [];
+    const n = 11;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + (geode ? 0.3 : 0);
+      const r = R * (0.86 + 0.14 * Math.sin(i * 2.3 + (geode ? 1 : 0)));
+      pts.push(new Phaser.Math.Vector2(cx + Math.cos(a) * r, cy + Math.sin(a) * r));
+    }
+    const grow = (k: number) => pts.map((p) => new Phaser.Math.Vector2(cx + (p.x - cx) * k, cy + (p.y - cy) * k));
+    g.fillStyle(0x2a2320, 1).fillPoints(grow(1.1), true);
+    g.fillStyle(geode ? 0x6f4cc2 : 0x8a7f78, 1).fillPoints(pts, true);
+    g.fillStyle(geode ? 0x8a5ce0 : 0xa59a92, 1).fillPoints(grow(0.72), true);
+    if (geode) {
+      g.fillStyle(C.crit, 1);
+      g.fillTriangle(cx - 8, cy + 6, cx, cy - 18, cx + 8, cy + 6);
+      g.fillTriangle(cx + 6, cy + 10, cx + 16, cy - 6, cx + 24, cy + 10);
+    }
+    g.lineStyle(3, 0x2a2320, 1);
+    const cracks = Math.floor(damage * 4);
+    for (let i = 0; i < cracks; i++) {
+      const a = i * 1.7 + 0.5;
+      g.lineBetween(cx + Math.cos(a) * 10, cy + Math.sin(a) * 10, cx + Math.cos(a) * R * 0.85, cy + Math.sin(a + 0.4) * R * 0.85);
+    }
   }
 
   private drawStars(): void {
