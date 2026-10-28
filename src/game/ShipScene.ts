@@ -2,11 +2,15 @@ import Phaser from 'phaser';
 import { buyTile, canAfford } from '../core/actions';
 import { currentGoal } from '../core/goals';
 import { cellKey, nextTileCost, parseKey, unlockableCells } from '../core/hull';
-import { sell, tapBeam, tapCrush, tick, weakActive } from '../core/loop';
+import {
+  canSend, holdCrush, nextSmasherUpgrade, releaseHold, repairSmasher, sell, sellableOre, sendToSmasher,
+  smasherQueueCap, tapBeam, tapCrush, tick, upgradeSmasher, weakActive,
+} from '../core/loop';
 import { loadFromStorage, saveToStorage } from '../core/save';
 import { createInitialState } from '../core/state';
 import type { Cell, Cost, GameEvent, GameState } from '../core/types';
 import { BAL } from '../data/balance';
+import { SMASHER } from '../data/smasher';
 import { HULLS } from '../data/hulls';
 import { C, FONT, T } from './palette';
 
@@ -33,7 +37,9 @@ export class ShipScene extends Phaser.Scene {
   private toast?: Phaser.GameObjects.Text;
   private debug = new URLSearchParams(window.location.search).has('debug');
   private dyn!: Phaser.GameObjects.Graphics;
-  private tx!: Record<'stage' | 'fire' | 'sell' | 'beam' | 'heat' | 'bay' | 'hp', Phaser.GameObjects.Text>;
+  private tx!: Record<'stage' | 'fire' | 'sell' | 'beam' | 'heat' | 'bay' | 'hp' | 'send' | 'smash', Phaser.GameObjects.Text>;
+  private holdPointer: Phaser.Input.Pointer | null = null;
+  private sheet?: Phaser.GameObjects.Container;
   private forceGeode = false;
   private shake = 0;
   private saveTimer = 0;
@@ -67,12 +73,43 @@ export class ShipScene extends Phaser.Scene {
     const out = tick(this.state, dt, this.forceGeode);
     this.state = out.state;
     this.handleEvents(out.events, W / 2, STAGE.cy);
+    this.afterEvents(out.events);
+    this.updateHold(dt);
     this.saveTimer += dt;
     if (this.saveTimer > 5) {
       this.saveTimer = 0;
       saveToStorage(this.state);
     }
     this.drawDynamic();
+  }
+
+  /** Static layer (HUD numbers, goal chip) only needs a rebuild when Ore or credits change. */
+  private afterEvents(events: GameEvent[]): void {
+    if (events.some((e) => e.kind === 'crushed' || e.kind === 'smashed')) this.redraw();
+  }
+
+  private updateHold(dt: number): void {
+    const p = this.holdPointer;
+    if (!p) return;
+    if (!p.isDown || this.state.crusher.lockout > 0 || !this.state.crusher.rock) {
+      this.endHold();
+      return;
+    }
+    const nx = (p.worldX - STAGE.cx) / STAGE.r;
+    const ny = (p.worldY - STAGE.cy) / STAGE.r;
+    if (Math.hypot(nx, ny) * STAGE.r > STAGE.r + BAL.hold.slack) {
+      this.endHold(); // finger drifted off the rock
+      return;
+    }
+    const out = holdCrush(this.state, dt, nx, ny);
+    this.state = out.state;
+    this.handleEvents(out.events, p.worldX, p.worldY);
+    this.afterEvents(out.events);
+  }
+
+  private endHold(): void {
+    this.holdPointer = null;
+    this.state = releaseHold(this.state).state;
   }
 
   private txt(x: number, y: number, text: string, style: Phaser.Types.GameObjects.Text.TextStyle): Phaser.GameObjects.Text {
@@ -159,7 +196,12 @@ export class ShipScene extends Phaser.Scene {
     const beamHit = this.add.zone(bp.x + TILE / 2, bp.y + TILE / 2, TILE, TILE).setInteractive();
     beamHit.on('pointerdown', () => this.onBeamTap());
     this.layer.add(beamHit);
-    this.placeholder(owned, { x: 2, y: 1 }, C.crusher, 'Crush');
+    const rusty = !this.state.smasher.repaired;
+    this.placeholder(owned, { x: 2, y: 1 }, rusty ? 0x6b5648 : C.crusher, rusty ? 'Rusty' : 'Smash');
+    const sp = this.px({ x: 2, y: 1 });
+    const smHit = this.add.zone(sp.x + TILE / 2, sp.y + TILE / 2, TILE, TILE).setInteractive();
+    smHit.on('pointerdown', () => this.onSmasherTap());
+    this.layer.add(smHit);
     this.placeholder(owned, { x: 2, y: 2 }, 0x18223f, 'Open', true);
   }
 
@@ -274,13 +316,18 @@ export class ShipScene extends Phaser.Scene {
         this.apply({ ...s, credits: s.credits + 500, items: Object.fromEntries(Object.entries(s.items).map(([k, v]) => [k, v + 20])) as GameState['items'] });
       });
       mk(140, '[+60s]', () => {
-        let cur = this.state;
-        for (let i = 0; i < 600; i++) cur = tick(cur, 0.1, this.forceGeode).state;
-        this.apply(cur);
+        this.debugAdvance(60);
       });
       mk(246, this.forceGeode ? '[geodes ON]' : '[geodes off]', () => { this.forceGeode = !this.forceGeode; this.redraw(); });
       mk(340, '[reset]', () => this.apply(createInitialState()));
     }
+  }
+
+  /** Debug only: run the simulation forward by `sec` game-seconds (used by +60s and scripted tests). */
+  debugAdvance(sec: number): void {
+    let cur = this.state;
+    for (let i = 0; i < Math.round(sec * 10); i++) cur = tick(cur, 0.1, this.forceGeode).state;
+    this.apply(cur);
   }
 
   private drawTabs(): void {
@@ -320,6 +367,7 @@ export class ShipScene extends Phaser.Scene {
     if (!c.rock) return;
     const nx = (p.worldX - STAGE.cx) / STAGE.r;
     const ny = (p.worldY - STAGE.cy) / STAGE.r;
+    if (!this.holdPointer && c.lockout <= 0) this.holdPointer = p; // first finger may become a hold
     const out = tapCrush(this.state, nx, ny);
     if (out.state === this.state) {
       if (c.lockout > 0) this.shake = 0.5;
@@ -327,13 +375,109 @@ export class ShipScene extends Phaser.Scene {
     }
     this.state = out.state;
     this.handleEvents(out.events, p.worldX, p.worldY);
-    if (out.events.some((e) => e.kind === 'crushed')) this.redraw(); // credits and Ore changed
+    this.afterEvents(out.events);
+  }
+
+  private onSend(): void {
+    const chk = canSend(this.state);
+    if (!chk.ok) {
+      if (chk.reason !== 'no_rock') this.showToast(chk.label);
+      return;
+    }
+    this.endHold();
+    const out = sendToSmasher(this.state);
+    this.state = out.state;
+    saveToStorage(this.state);
+    this.handleEvents(out.events, STAGE.cx, STAGE.cy);
+    this.redraw();
+  }
+
+  private onSmasherTap(): void {
+    this.showSmasherSheet();
+  }
+
+  private closeSheet(): void {
+    this.sheet?.destroy(true);
+    this.sheet = undefined;
+  }
+
+  /** One bottom sheet at a time: repair the rusty Smasher, or upgrade it. */
+  private showSmasherSheet(): void {
+    this.closeSheet();
+    const st = this.state;
+    const sm = st.smasher;
+    const box = this.add.container(0, 0).setDepth(30);
+    const dim = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.55).setInteractive();
+    dim.on('pointerdown', () => this.closeSheet());
+    const panelY = 420, panelH = 330;
+    const panel = this.add.graphics();
+    panel.fillStyle(C.panel, 1).fillRoundedRect(16, panelY, 358, panelH, 26);
+    panel.lineStyle(3, C.panelEdge, 1).strokeRoundedRect(16, panelY, 358, panelH, 26);
+    const absorb = this.add.zone(W / 2, panelY + panelH / 2, 358, panelH).setInteractive();
+    absorb.on('pointerdown', () => undefined);
+    box.add([dim, panel, absorb]);
+
+    const t = (x: number, y: number, str: string, size: number, color: string = T.text, bold = false, ox = 0) =>
+      this.txt(x, y, str, { fontFamily: FONT, fontSize: `${size}px`, fontStyle: bold ? '600' : '400', color, wordWrap: { width: 320 }, align: ox === 0.5 ? 'center' : 'left' }).setOrigin(ox, 0);
+    const lines: Phaser.GameObjects.Text[] = [];
+    const cost = sm.repaired ? nextSmasherUpgrade(st) : SMASHER.repair;
+    const costStr = cost
+      ? [cost.credits > 0 ? `${cost.credits} credits` : '', ...Object.entries(cost.items ?? {}).map(([k, v]) => `${v} ${k[0].toUpperCase()}${k.slice(1)}`)].filter(Boolean).join(' · ')
+      : '';
+    let can = false;
+    let actionLabel = '';
+    let action: () => void = () => undefined;
+    if (!sm.repaired) {
+      lines.push(t(36, panelY + 20, 'Rock Smasher (rusty)', 22, T.text, true));
+      lines.push(t(36, panelY + 58, 'Fix it and it smashes rocks while you do other things. It is slower than you and cannot open geodes.', 15, T.dim));
+      lines.push(t(36, panelY + 128, `Level 1: ${SMASHER.levels[0].hpPerSec} HP/s · holds ${SMASHER.levels[0].queue} rocks`, 15));
+      can = repairSmasher(st).ok;
+      actionLabel = can ? `Repair · ${costStr}` : `Need ${costStr}`;
+      action = () => {
+        const r = repairSmasher(this.state);
+        if (r.ok) { this.apply(r.state); this.handleEvents(r.events, STAGE.cx, STAGE.cy); this.floatText(OX + 2 * TILE + TILE / 2, OY + TILE + 10, 'Repaired!', T.gold); this.closeSheet(); }
+        else this.showToast('Not enough materials');
+      };
+    } else {
+      const lv = SMASHER.levels[sm.level - 1];
+      lines.push(t(36, panelY + 20, `Rock Smasher · Level ${sm.level}`, 22, T.text, true));
+      lines.push(t(36, panelY + 58, `Smashes ${lv.hpPerSec} HP per second. Holds ${lv.queue} rocks (${sm.queue.length} now).`, 15, T.dim));
+      lines.push(t(36, panelY + 108, 'Tap Send in the stage to give it a rock. Geodes stay with your hands.', 15, T.dim));
+      const nxt = SMASHER.levels[sm.level];
+      if (nxt) {
+        lines.push(t(36, panelY + 168, `Level ${sm.level + 1}: ${nxt.hpPerSec} HP/s · holds ${nxt.queue}${sm.level + 1 >= SMASHER.autoIntakeLevel ? ' · feeds itself from the beam' : ''}`, 15));
+        can = upgradeSmasher(st).ok;
+        actionLabel = can ? `Upgrade · ${costStr}` : `Need ${costStr}`;
+        action = () => {
+          const r = upgradeSmasher(this.state);
+          if (r.ok) { this.apply(r.state); this.showSmasherSheet(); }
+          else this.showToast('Not enough credits');
+        };
+      } else {
+        lines.push(t(36, panelY + 168, 'Fully upgraded.', 15, T.gold));
+      }
+    }
+    box.add(lines);
+    if (actionLabel) {
+      const by = panelY + panelH - 76;
+      const btn = this.add.graphics();
+      btn.fillStyle(can ? C.crit : C.panelEdge, 1).fillRoundedRect(36, by, 318, 52, 26);
+      const lab = this.txt(W / 2, by + 26, actionLabel, { fontFamily: FONT, fontSize: '18px', fontStyle: '600', color: can ? '#0B1020' : T.dim }).setOrigin(0.5);
+      const z = this.add.zone(W / 2, by + 26, 318, 52).setInteractive();
+      z.on('pointerdown', action);
+      box.add([btn, lab, z]);
+    }
+    const close = this.txt(W - 40, panelY + 18, 'Close', { fontFamily: FONT, fontSize: '15px', color: T.dim }).setOrigin(1, 0).setInteractive();
+    close.on('pointerdown', () => this.closeSheet());
+    box.add(close);
+    this.sheet = box;
   }
 
   private onSell(): void {
-    const out = sell(this.state, 'ore');
+    const n = sellableOre(this.state);
+    const out = sell(this.state, 'ore', n);
     if (out.state === this.state) {
-      this.showToast('No Ore to sell');
+      this.showToast(this.state.items.ore >= 1 ? 'Keeping Ore for your goal' : 'No Ore to sell');
       return;
     }
     this.apply(out.state);
@@ -350,6 +494,8 @@ export class ShipScene extends Phaser.Scene {
           this.chips(x, y, e.crit ? C.crit : 0xc8bdb2, e.crit ? 10 : 5);
           if (e.crit) this.floatText(x, y - 20, '3x', T.gold);
           break;
+        case 'hold_tick':
+          break;
         case 'overheat':
           this.floatText(STAGE.cx, STAGE.y + 24, 'Overheated!', T.coral);
           break;
@@ -363,6 +509,13 @@ export class ShipScene extends Phaser.Scene {
           break;
         case 'rock_arrived':
           this.chips(STAGE.cx, STAGE.y + 10, C.beam, 8);
+          break;
+        case 'sent':
+          this.chips(STAGE.cx, STAGE.cy, C.beam, 10);
+          this.floatText(STAGE.cx, STAGE.cy - 30, 'Sent!', T.gold);
+          break;
+        case 'smashed':
+          this.floatText(OX + 2 * TILE + TILE / 2, OY + TILE + 6, `+${e.ore} Ore`, T.text);
           break;
         default:
           break;
@@ -393,10 +546,12 @@ export class ShipScene extends Phaser.Scene {
     this.dyn = this.add.graphics().setDepth(5);
     const mk = (size: number, color: string = T.text) =>
       this.txt(0, 0, '', { fontFamily: FONT, fontSize: `${size}px`, fontStyle: '600', color, align: 'center' }).setOrigin(0.5).setDepth(6);
-    this.tx = { stage: mk(15, T.dim), fire: mk(17), sell: mk(17, '#0B1020'), beam: mk(17), heat: mk(12, T.dim), bay: mk(12, T.dim), hp: mk(12, T.dim) };
+    this.tx = { stage: mk(15, T.dim), fire: mk(17), sell: mk(17, '#0B1020'), beam: mk(17), heat: mk(12, T.dim), bay: mk(12, T.dim), hp: mk(12, T.dim), send: mk(15, '#0B1020'), smash: mk(12, T.text) };
 
     const stage = this.add.zone(STAGE.x + STAGE.w / 2, STAGE.y + STAGE.h / 2, STAGE.w, STAGE.h).setInteractive();
     stage.on('pointerdown', (p: Phaser.Input.Pointer) => this.onStageDown(p));
+    const send = this.add.zone(328, STAGE.cy, 76, 56).setInteractive();
+    send.on('pointerdown', () => this.onSend());
     const fire = this.add.zone(16 + 105, ACTION.y + ACTION.h / 2, 210, ACTION.h).setInteractive();
     fire.on('pointerdown', () => this.onBeamTap());
     const sellZ = this.add.zone(238 + 68, ACTION.y + ACTION.h / 2, 136, ACTION.h).setInteractive();
@@ -457,22 +612,35 @@ export class ShipScene extends Phaser.Scene {
       }
       // HP bar
       const frac = Math.max(0, c.rock.hp / c.rock.maxHp);
-      g.fillStyle(C.deck, 1).fillRoundedRect(STAGE.cx - 70, STAGE.y + STAGE.h - 22, 140, 10, 5);
-      g.fillStyle(C.crusher, 1).fillRoundedRect(STAGE.cx - 70, STAGE.y + STAGE.h - 22, 140 * frac, 10, 5);
-      if (c.lockout > 0) stageText = 'Overheated!';
+      g.fillStyle(C.deck, 1).fillRoundedRect(STAGE.cx - 70, STAGE.y + STAGE.h - 15, 140, 8, 4);
+      g.fillStyle(C.crusher, 1).fillRoundedRect(STAGE.cx - 70, STAGE.y + STAGE.h - 15, 140 * frac, 8, 4);
+      // radial heat arc
+      const hf = Math.min(1, c.heat / BAL.heat.max);
+      if (c.lockout > 0) {
+        const sweep = c.lockout / BAL.heat.lockout;
+        g.lineStyle(6, 0x9fd8ff, 0.9).beginPath().arc(STAGE.cx, STAGE.cy, STAGE.r + 9, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * sweep, false).strokePath();
+      } else if (hf >= 0.3) {
+        g.lineStyle(6, this.heatColor(hf), 1).beginPath().arc(STAGE.cx, STAGE.cy, STAGE.r + 9, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hf, false).strokePath();
+      }
+      if (c.lockout > 0) stageText = 'JAMMED';
       else if (st.stats.rocks === 0) stageText = 'Tap the rock. Hit the glow for 3x.';
+      else if (st.stats.taps >= 15 && !st.flags.usedHold) stageText = 'Hold your finger to keep cracking.';
     } else if (beam.status === 'counting') {
       stageText = 'Asteroid incoming...';
     } else {
       stageText = st.flags.tappedBeam ? 'Tap the beam for another asteroid' : 'Tap the beam to call an asteroid';
     }
-    this.setText(this.tx.stage, STAGE.cx, c.rock ? STAGE.y + 20 : STAGE.cy, stageText, c.lockout > 0 ? T.coral : T.dim);
+    this.setText(this.tx.stage, STAGE.cx, c.rock ? STAGE.y + 13 : STAGE.cy, stageText, c.lockout > 0 ? '#9fd8ff' : T.dim);
+
+    // --- Send button + Smasher overlay
+    this.drawSend(g, st);
+    this.drawSmasher(g, st);
 
     // --- status strip: heat + Bay
     const heatFrac = Math.min(1, c.heat / BAL.heat.max);
     const hx = 16, hy = STRIP_Y + 18, hw = 176;
     g.fillStyle(C.deck, 1).fillRoundedRect(hx, hy, hw, 16, 8);
-    const hc = c.lockout > 0 ? C.coral : heatFrac > 0.7 ? C.crusher : heatFrac > 0.4 ? C.crit : C.beam;
+    const hc = c.lockout > 0 ? 0x9fd8ff : this.heatColor(heatFrac);
     if (heatFrac > 0) g.fillStyle(hc, 1).fillRoundedRect(hx, hy, Math.max(16, hw * heatFrac), 16, 8);
     this.setText(this.tx.heat, hx + 18, STRIP_Y + 8, 'Heat');
     this.setText(this.tx.bay, 224, STRIP_Y + 26, 'Bay');
@@ -491,13 +659,56 @@ export class ShipScene extends Phaser.Scene {
     const fireText = beam.status === 'idle' ? 'Fire beam' : beam.status === 'counting' ? `Incoming ${Math.max(0, beam.remaining).toFixed(1)}s` : 'Bay full';
     this.setText(this.tx.fire, 121, ACTION.y + ACTION.h / 2, fireText, ready ? '#0B1020' : T.dim);
 
-    const ore = Math.floor(st.items.ore);
+    const ore = sellableOre(st);
     const canSell = ore > 0;
     const sellPulse = canSell && currentGoal(st)?.id === 'sell' ? 0.6 + 0.4 * Math.sin(now * 6) : 1;
     g.fillStyle(canSell ? C.crit : C.panelEdge, canSell ? sellPulse : 1).fillRoundedRect(238, ACTION.y, 136, ACTION.h, 23);
     g.lineStyle(3, C.hullOutline, 1).strokeRoundedRect(238, ACTION.y, 136, ACTION.h, 23);
     this.setText(this.tx.sell, 306, ACTION.y + ACTION.h / 2, canSell ? `Sell ${ore} Ore` : 'Sell', canSell ? '#0B1020' : T.dim);
     this.setText(this.tx.hp, -100, -100, '');
+  }
+
+  private heatColor(f: number): number {
+    return f >= 0.9 ? C.coral : f >= 0.7 ? C.crusher : f >= 0.5 ? C.crit : C.beam;
+  }
+
+  private drawSend(g: Phaser.GameObjects.Graphics, st: GameState): void {
+    const x = 290, y = STAGE.cy - 28, w = 76, h = 56;
+    if (!st.smasher.repaired || !st.crusher.rock) {
+      this.setText(this.tx.send, -100, -100, '');
+      return;
+    }
+    const chk = canSend(st);
+    const ok = chk.ok;
+    const pulse = ok && currentGoal(st)?.id === 'send' ? 0.6 + 0.4 * Math.sin(this.elapsed * 6) : 1;
+    g.fillStyle(ok ? C.beam : C.panelEdge, ok ? pulse : 1).fillRoundedRect(x, y, w, h, 18);
+    g.lineStyle(3, C.hullOutline, 1).strokeRoundedRect(x, y, w, h, 18);
+    this.setText(this.tx.send, x + w / 2, y + h / 2, ok ? 'Send' : chk.reason === 'geode' ? 'Geode' : 'Full', ok ? '#0B1020' : T.dim);
+  }
+
+  /** Smasher tile overlay: progress ring on the head rock, queue pips underneath. */
+  private drawSmasher(g: Phaser.GameObjects.Graphics, st: GameState): void {
+    const sp = this.px({ x: 2, y: 1 });
+    const cx = sp.x + TILE / 2, cy = sp.y + TILE / 2;
+    const sm = st.smasher;
+    if (!sm.repaired) {
+      const goal = currentGoal(st)?.id === 'repair';
+      if (goal) g.lineStyle(3, C.crit, 0.55 + 0.45 * Math.sin(this.elapsed * 5)).strokeRoundedRect(sp.x + 2, sp.y + 2, TILE - 4, TILE - 4, 10);
+      this.setText(this.tx.smash, -100, -100, '');
+      return;
+    }
+    const head = sm.queue[0];
+    if (head) {
+      const frac = 1 - head.hp / head.maxHp;
+      g.lineStyle(4, 0x2a2320, 0.4).strokeCircle(cx, cy, 20);
+      g.lineStyle(4, C.crit, 1).beginPath().arc(cx, cy, 20, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac, false).strokePath();
+    }
+    const cap = smasherQueueCap(st);
+    for (let i = 0; i < cap; i++) {
+      const px = cx - ((cap - 1) * 7) / 2 + i * 7;
+      g.fillStyle(i < sm.queue.length ? C.crit : C.deck, 1).fillCircle(px, sp.y + TILE - 6, 2.6);
+    }
+    this.setText(this.tx.smash, -100, -100, '');
   }
 
   private drawRock(g: Phaser.GameObjects.Graphics, cx: number, cy: number, geode: boolean, damage: number): void {

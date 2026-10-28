@@ -47,6 +47,11 @@ export interface CrusherState {
   heat: number;
   /** Seconds left of overheat lockout. */
   lockout: number;
+  /** True while a finger is held on the rock past the hold delay (heat does not cool). */
+  holding: boolean;
+  /** Seconds the current hold has lasted, and the fractional auto-tap accumulator. */
+  holdT: number;
+  holdAcc: number;
   /** Position inside the weak-point cycle (seconds). Visible while < BAL.weak.active. */
   weakT: number;
   /** Weak point offset from the rock centre, in rock radii. */
@@ -54,11 +59,23 @@ export interface CrusherState {
   weakY: number;
 }
 
+export interface SmasherState {
+  /** The old Crusher tile starts Rusty (inert) and is repaired once. */
+  repaired: boolean;
+  level: number; // 1..4
+  /** Rocks waiting (and the one being smashed, at index 0). HP is the remaining HP. */
+  queue: Rock[];
+}
+
 export interface Stats {
   rocks: number;
   geodes: number;
   sold: number;
   taps: number;
+  holdTicks: number;
+  sent: number;
+  smashed: number;
+  overheats: number;
 }
 
 export interface GameState {
@@ -70,11 +87,13 @@ export interface GameState {
   rng: number;
   beams: BeamState[];
   bay: Rock[];
+  /** The stage (hand-crushing) state. Named crusher for historical reasons. */
   crusher: CrusherState;
+  smasher: SmasherState;
   stats: Stats;
   /** Geodes opened since the last guaranteed Core Shard. Persists across Jump. */
   pity: number;
-  flags: { tappedBeam: boolean };
+  flags: { tappedBeam: boolean; usedHold: boolean };
 }
 
 export type GameEvent =
@@ -82,5 +101,10 @@ export type GameEvent =
   | { kind: 'beam_blocked' }
   | { kind: 'hit'; crit: boolean }
   | { kind: 'overheat' }
+  | { kind: 'hold_tick' }
+  | { kind: 'sent' }
+  | { kind: 'smashed'; ore: number }
+  | { kind: 'repaired' }
+  | { kind: 'smasher_upgraded'; level: number }
   | { kind: 'crushed'; ore: number; geode: boolean; credits: number; shard: boolean }
   | { kind: 'sold'; item: ItemId; qty: number; credits: number };

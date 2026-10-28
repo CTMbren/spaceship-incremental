@@ -24,4 +24,5 @@ async function start(): Promise<void> {
   });
 }
 
+document.addEventListener('contextmenu', (e) => e.preventDefault());
 void start();

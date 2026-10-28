@@ -154,7 +154,7 @@ describe('sell and goals', () => {
     expect(JSON.stringify(s)).toBe(before);
     expect(sell(r.state, 'ore').events).toEqual([]);
   });
-  it('goal chain: tap beam, crush, sell, then the hull goal takes over', () => {
+  it('goal chain: tap beam, crush, sell, repair, send, then the hull goal takes over', () => {
     let s = createInitialState();
     expect(currentGoal(s)?.id).toBe('tap-beam');
     s = tapBeam(s).state;
@@ -162,22 +162,40 @@ describe('sell and goals', () => {
     s = { ...s, stats: { ...s.stats, rocks: 1 } };
     expect(currentGoal(s)?.id).toBe('sell');
     s = { ...s, stats: { ...s.stats, sold: 1 } };
+    expect(currentGoal(s)?.id).toBe('repair');
+    s = { ...s, smasher: { ...s.smasher, repaired: true } };
+    expect(currentGoal(s)?.id).toBe('send');
+    s = { ...s, stats: { ...s.stats, sent: 1 } };
     expect(currentGoal(s)).toBeNull();
   });
 });
 
 describe('save migration', () => {
-  it('upgrades a v1 save and keeps credits, items and hull', () => {
+  it('upgrades a v1 save through to v3 and keeps credits, items and hull', () => {
     const v1 = JSON.stringify({
       version: 1, credits: 321, items: { ore: 5 },
       ship: { hullId: 'tug', ownedCells: ['2,0', '2,1', '2,2', '1,2'] },
     });
     const s = deserialize(v1);
-    expect(s.version).toBe(2);
+    expect(s.version).toBe(3);
     expect(s.credits).toBe(321);
     expect(s.items.ore).toBe(5);
     expect(s.items.ice).toBe(0);
     expect(s.ship.ownedCells).toHaveLength(4);
     expect(s.beams).toHaveLength(1);
+    expect(s.smasher.repaired).toBe(false);
+  });
+  it('v2 -> v3: new players get a Rusty Smasher, experienced ones keep a working one', () => {
+    const base = createInitialState();
+    const mk = (rocks: number) => JSON.stringify({ ...base, version: 2, stats: { rocks, geodes: 0, sold: 0, taps: 0 }, smasher: undefined });
+    expect(deserialize(mk(2)).smasher).toEqual({ repaired: false, level: 1, queue: [] });
+    expect(deserialize(mk(25)).smasher.repaired).toBe(true);
+    expect(deserialize(mk(2)).stats.holdTicks).toBe(0);
+  });
+  it('migrating twice gives the same result (idempotent)', () => {
+    const v2 = JSON.stringify({ ...createInitialState(), version: 2, smasher: undefined });
+    const once = deserialize(v2);
+    const twice = deserialize(JSON.stringify(once));
+    expect(twice).toEqual(once);
   });
 });

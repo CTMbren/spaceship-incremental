@@ -3,7 +3,7 @@ import { HULL_TUG } from '../data/hulls';
 import { cellKey } from './hull';
 import type { GameState, ItemId } from './types';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 export const ITEM_IDS: readonly ItemId[] = ['ore', 'ice', 'plate', 'coolant', 'circuit', 'core_shard'];
 
 export function createInitialState(seed = 1): GameState {
@@ -16,9 +16,10 @@ export function createInitialState(seed = 1): GameState {
     rng: seed,
     beams: [{ status: 'idle', remaining: 0 }],
     bay: [],
-    crusher: { rock: null, heat: 0, lockout: 0, weakT: 0, weakX: 0, weakY: 0 },
-    stats: { rocks: 0, geodes: 0, sold: 0, taps: 0 },
+    crusher: { rock: null, heat: 0, lockout: 0, holding: false, holdT: 0, holdAcc: 0, weakT: 0, weakX: 0, weakY: 0 },
+    smasher: { repaired: false, level: 1, queue: [] },
+    stats: { rocks: 0, geodes: 0, sold: 0, taps: 0, holdTicks: 0, sent: 0, smashed: 0, overheats: 0 },
     pity: 0,
-    flags: { tappedBeam: false },
+    flags: { tappedBeam: false, usedHold: false },
   };
 }

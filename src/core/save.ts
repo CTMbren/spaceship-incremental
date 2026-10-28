@@ -15,17 +15,36 @@ export function deserialize(raw: string | null): GameState {
   try {
     const data = JSON.parse(raw) as Loose;
     if (typeof data?.version !== 'number' || data.version > SAVE_VERSION) return createInitialState();
-    // Migrations. v1 -> v2: added the core-loop state; keep credits, items and hull.
-    if (data.version < 2) {
+    // Migrations (each step upgrades one version; all are idempotent).
+    let cur: Loose = data;
+    if (cur.version < 2) {
+      // v1 -> v2: added the core-loop state; keep credits, items and hull.
       const fresh = createInitialState();
-      return {
+      cur = {
         ...fresh,
-        credits: data.credits ?? fresh.credits,
-        items: { ...fresh.items, ...(data.items ?? {}) },
-        ship: data.ship ?? fresh.ship,
+        credits: cur.credits ?? fresh.credits,
+        items: { ...fresh.items, ...(cur.items ?? {}) },
+        ship: cur.ship ?? fresh.ship,
+        version: 2,
       };
     }
-    return { ...createInitialState(), ...data } as GameState;
+    if (cur.version < 3) {
+      // v2 -> v3: the Crusher tile became the Rock Smasher; hold + heat; richer stats.
+      // Players who already cracked 10+ rocks keep a working Smasher; newer saves get the Rusty start.
+      const fresh = createInitialState();
+      const stats = { ...fresh.stats, ...(cur.stats ?? {}) };
+      cur = {
+        ...fresh,
+        ...cur,
+        stats,
+        crusher: { ...fresh.crusher, ...(cur.crusher ?? {}), holding: false, holdT: 0, holdAcc: 0 },
+        smasher: { repaired: stats.rocks >= 10, level: 1, queue: [] },
+        flags: { ...fresh.flags, ...(cur.flags ?? {}) },
+        version: 3,
+      };
+    }
+    data.version = cur.version;
+    return { ...createInitialState(), ...cur } as GameState;
   } catch {
     return createInitialState();
   }
