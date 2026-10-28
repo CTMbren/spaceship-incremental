@@ -16,6 +16,9 @@ Goal (2 weeks): core loop, polished, playable on iPhone 12 / Chrome via GitHub P
 4. Port `src/sim/econ_sim.py` to TypeScript; check the first 30 minutes against the real rules (casual ~70 min, semi-idle <=85 min target with the Smasher).
 5. Day 6: offline catch-up tiers (0-2 h 30%, 2-8 h 10%, cap 8 h) + welcome-back, upgrade UI polish, playtest build.
 
+## Planned: Milestone 2 (planning only, see `docs/travel-shop-rover-jump-plan.md`)
+Travel along a system route (Engine, nodes, offline travel), Rover expeditions at planets, three shops (Workshop, Station Trader, Flux Exchange), Jump as shockwave damage with Braces instead of a reset, more modules. Proposed order: Days 8 to 12 after the Day 7 core-loop and layout playtest gate. Open decisions for Brendan are in section 9 of that doc.
+
 ## Known issues
 - Patch 4.1 changed the hand-crack time a lot (about 2.5x longer taps) and the beam is much faster; the econ sim has not been re-run, expect hour-one pacing to shift (Smasher is now the main way to keep up). Re-tune in the Day 5 sim port.
 - With one beam and the beam locked during a rock, the Bay stays empty, so Smasher auto-intake (L2) does nothing until the second beam arrives (Day 5).
@@ -28,6 +31,7 @@ Goal (2 weeks): core loop, polished, playable on iPhone 12 / Chrome via GitHub P
 - Layout: hull in the upper half, crush stage panel, Heat + Bay strip, Fire and Sell buttons, tab bar (Build tab is a stub).
 
 ## Open decisions
+- Milestone 2 decisions (hull persists, materials persist, spatial shockwave, offline travel, finite rover sites, when to commit): see section 9 of the travel/rover/Jump plan.
 - Decided on Day 2-3: the rock appears in a stage panel under the ship (below the hull, above the Fire button).
 - Bay upgrade costs (not covered by the sim).
 - Title: "Last Tug: Idle Salvage" provisional.
