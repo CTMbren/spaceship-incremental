@@ -12,7 +12,9 @@ export const CELL = 56;
 /** The ship is drawn at this zoom on screen. */
 export const ZOOM = 1.5;
 /** The screen rectangle (logical px) where the ship lives; it is clipped to this. */
-export const VIEW = { x: 0, y: 118, w: 390, h: 312 } as const;
+export const VIEW = { x: 0, y: 118, w: 390, h: 312 };
+/** The scene widens the view to the screen width at startup (see ShipScene). */
+export const setViewWidth = (w: number): void => { VIEW.w = w; };
 /** Gap kept between the ship and the viewport edge when it has to scroll. */
 export const PAN_PAD = 12;
 /** Extra room for the nose cone, engine bells and fins (local units). */

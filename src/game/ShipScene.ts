@@ -26,21 +26,33 @@ import { drawHullExterior } from './hullArt';
 import { C, FONT, T } from './palette';
 import {
   arrowsFor, boundsOf, CELL, clampPan, localPos, panLimits, panToShow, toScreen, VIEW, ZOOM,
-  type PanLimits,
+  setViewWidth, type PanLimits,
 } from './shipLayout';
 
-export const W = 390;
 export const H = 844;
+/** Narrowest and widest logical width. A phone with browser toolbars is shorter than 390x844, so the game
+ *  would shrink to fit the height and leave empty bars at the sides; instead the layout gets wider. */
+const MIN_W = 390;
+const MAX_W = 520;
+export const W = Math.round(Math.min(MAX_W, Math.max(MIN_W, H * (window.innerWidth / Math.max(1, window.innerHeight)))));
+setViewWidth(W);
+/** Content width: the screen minus a 16px margin on each side. */
+const CW = W - 32;
 /** Render at the device pixel ratio (capped) so text and shapes stay sharp on retina phones. */
 export const DPR = Math.min(Math.max(window.devicePixelRatio || 1, 1), 3);
 const TILE = CELL; // local tile size; the ship container is scaled by ZOOM on screen
 const PAN_SPEED = 420; // px per second while an arrow is held
 const MAX_GHOSTS = 4;
-const STAGE = { x: 16, y: 466, w: 358, h: 184, cx: 195, cy: 556, r: 60 };
+const STAGE = { x: 16, y: 466, w: CW, h: 184, cx: W / 2, cy: 556, r: 60 };
 const STRIP_Y = 660;
 /** The Bay: three slots at the right of the status strip. */
-const BAY = { x: 244, y: STRIP_Y + 3, size: 34, gap: 8 };
+const BAY = { x: W - 146, y: STRIP_Y + 3, size: 34, gap: 8 };
 const ACTION = { y: 706, h: 46 };
+/** Fire takes about 60% of the action row, Sell the rest. */
+const FIRE = { x: 16, w: Math.round((CW - 12) * 0.607) };
+const SELL = { x: 16 + FIRE.w + 12, w: CW - FIRE.w - 12 };
+/** The Smash button sits at the right end of the stage. */
+const SMASH = { x: STAGE.x + STAGE.w - 84, w: 76, h: 56 };
 
 const SMELTER_COLOR = 0xb4552f;
 
@@ -477,14 +489,14 @@ export class ShipScene extends Phaser.Scene {
     const goal = currentGoal(st);
     const chipText = hudChipText(st);
     const chip = this.add.graphics();
-    chip.fillStyle(C.panel, 1).fillRoundedRect(16, 66, 306, 44, 22);
-    chip.lineStyle(3, goal ? C.crit : C.panelEdge, 1).strokeRoundedRect(16, 66, 306, 44, 22);
-    const chipLabel = this.txt(16 + 153, 88, chipText, {
-      fontFamily: FONT, fontSize: '14px', color: T.text, fixedWidth: 270, align: 'center', wordWrap: { width: 270 },
+    chip.fillStyle(C.panel, 1).fillRoundedRect(16, 66, CW - 52, 44, 22);
+    chip.lineStyle(3, goal ? C.crit : C.panelEdge, 1).strokeRoundedRect(16, 66, CW - 52, 44, 22);
+    const chipLabel = this.txt(16 + (CW - 52) / 2, 88, chipText, {
+      fontFamily: FONT, fontSize: '14px', color: T.text, fixedWidth: CW - 88, align: 'center', wordWrap: { width: CW - 88 },
     }).setOrigin(0.5);
     // gear button: opens the menu
     const gear = this.add.graphics();
-    const gx = 352, gy = 88;
+    const gx = W - 38, gy = 88;
     gear.fillStyle(C.panel, 1).fillRoundedRect(gx - 22, gy - 22, 44, 44, 22);
     gear.lineStyle(3, this.sheetKind === 'menu' ? C.crit : C.panelEdge, 1).strokeRoundedRect(gx - 22, gy - 22, 44, 44, 22);
     gear.lineStyle(5, 0xaeb9d6, 1);
@@ -509,7 +521,7 @@ export class ShipScene extends Phaser.Scene {
 
     if (this.debug) {
       const mk = (x: number, label: string, fn: () => void) => {
-        const t = this.txt(x, 436, label, { fontFamily: FONT, fontSize: '13px', color: T.coral })
+        const t = this.txt(Math.round((x * W) / 390), 436, label, { fontFamily: FONT, fontSize: '13px', color: T.coral })
           .setOrigin(0.5, 0).setInteractive();
         t.on('pointerup', fn);
         this.hud.add(t);
@@ -654,7 +666,7 @@ export class ShipScene extends Phaser.Scene {
   }
 
   private renderSheet(title: string, rows: SheetRow[], footer?: SheetFooter): Phaser.GameObjects.Container {
-    const X = 36, WID = 318, BTN_W = 136, TXT_W = WID - BTN_W - 12, HEAD = 58, BOTTOM = H - 92;
+    const X = 36, WID = CW - 40, BTN_W = 136, TXT_W = WID - BTN_W - 12, HEAD = 58, BOTTOM = H - 92;
     const FOOT = footer ? 66 : 0;
     const CG_SELL = 88, CG_TXT = WID - 64 - CG_SELL - 8; // Cargo row: tick box + icon, text, Sell button
     const box = this.add.container(0, 0).setDepth(30);
@@ -694,16 +706,16 @@ export class ShipScene extends Phaser.Scene {
     this.sheetScroll = Math.min(Math.max(0, this.sheetScroll), maxScroll);
 
     const panel = this.add.graphics();
-    panel.fillStyle(C.panel, 1).fillRoundedRect(16, panelY, 358, panelH, 26);
-    panel.lineStyle(3, C.panelEdge, 1).strokeRoundedRect(16, panelY, 358, panelH, 26);
-    const absorb = this.add.zone(W / 2, panelY + panelH / 2, 358, panelH).setInteractive();
+    panel.fillStyle(C.panel, 1).fillRoundedRect(16, panelY, CW, panelH, 26);
+    panel.lineStyle(3, C.panelEdge, 1).strokeRoundedRect(16, panelY, CW, panelH, 26);
+    const absorb = this.add.zone(W / 2, panelY + panelH / 2, CW, panelH).setInteractive();
     box.add([panel, absorb]);
     box.add(this.txt(X, panelY + 18, title, { fontFamily: FONT, fontSize: '22px', fontStyle: '600', color: T.text }));
     // scrolling body: everything below the header lives in `body`, clipped to the panel
     const body = this.add.container(0, -this.sheetScroll);
     box.add(body);
     const clip = this.make.graphics({ x: 0, y: 0 }, false);
-    clip.fillStyle(0xffffff, 1).fillRect(16, viewTop, 358, viewBottom - viewTop);
+    clip.fillStyle(0xffffff, 1).fillRect(16, viewTop, CW, viewBottom - viewTop);
     body.setMask(clip.createGeometryMask());
     const bar = this.add.graphics();
     box.add(bar);
@@ -724,7 +736,7 @@ export class ShipScene extends Phaser.Scene {
       const trackH = viewBottom - viewTop - 8;
       const h = Math.max(30, trackH * ((viewBottom - viewTop) / (bodyH + 4)));
       const y = viewTop + 4 + (trackH - h) * (this.sheetScroll / maxScroll);
-      bar.fillStyle(C.ghost, 0.7).fillRoundedRect(366, y, 4, h, 2);
+      bar.fillStyle(C.ghost, 0.7).fillRoundedRect(W - 24, y, 4, h, 2);
     };
     const setScroll = (v: number) => {
       this.sheetScroll = Math.min(Math.max(0, v), maxScroll);
@@ -1302,17 +1314,17 @@ export class ShipScene extends Phaser.Scene {
 
     const stage = this.add.zone(STAGE.x + STAGE.w / 2, STAGE.y + STAGE.h / 2, STAGE.w, STAGE.h).setInteractive();
     stage.on('pointerdown', (p: Phaser.Input.Pointer) => this.onStageDown(p));
-    const send = this.add.zone(328, STAGE.cy, 76, 56).setInteractive();
+    const send = this.add.zone(SMASH.x + SMASH.w / 2, STAGE.cy, SMASH.w, SMASH.h).setInteractive();
     send.on('pointerdown', () => this.onSend());
-    const fire = this.add.zone(16 + 105, ACTION.y + ACTION.h / 2, 210, ACTION.h).setInteractive();
+    const fire = this.add.zone(FIRE.x + FIRE.w / 2, ACTION.y + ACTION.h / 2, FIRE.w, ACTION.h).setInteractive();
     fire.on('pointerdown', () => this.onFire());
     const tabShip = this.add.zone(W * 0.25, H - 42, 150, 80).setInteractive().setDepth(31);
     tabShip.on('pointerdown', () => this.closeSheet());
     const tabBuild = this.add.zone(W * 0.75, H - 42, 150, 80).setInteractive().setDepth(31);
     tabBuild.on('pointerdown', () => (this.sheetKind === 'workshop' ? this.closeSheet() : this.showWorkshop()));
-    const gearZ = this.add.zone(352, 88, 48, 48).setInteractive();
+    const gearZ = this.add.zone(W - 38, 88, 48, 48).setInteractive();
     gearZ.on('pointerdown', () => (this.sheetKind === 'menu' ? this.closeSheet() : this.showMenu()));
-    const sellZ = this.add.zone(238 + 68, ACTION.y + ACTION.h / 2, 136, ACTION.h).setInteractive();
+    const sellZ = this.add.zone(SELL.x + SELL.w / 2, ACTION.y + ACTION.h / 2, SELL.w, ACTION.h).setInteractive();
     sellZ.on('pointerdown', () => this.onSell());
 
     // scroll arrows: hold to pan; only active while the arrow is visible
@@ -1459,13 +1471,13 @@ export class ShipScene extends Phaser.Scene {
 
     // --- status strip: heat + Bay
     const heatFrac = Math.min(1, c.heat / hand.heatMax);
-    const hx = 16, hy = STRIP_Y + 18, hw = 176;
+    const hx = 16, hy = STRIP_Y + 18, hw = BAY.x - 16 - 52;
     g.fillStyle(C.deck, 1).fillRoundedRect(hx, hy, hw, 16, 8);
     const hc = c.lockout > 0 ? 0x9fd8ff : this.heatColor(heatFrac);
     if (heatFrac > 0) g.fillStyle(hc, 1).fillRoundedRect(hx, hy, Math.max(16, hw * heatFrac), 16, 8);
     this.setText(this.tx.heat, hx + 18, STRIP_Y + 8, 'Heat');
     const bayFull = st.bay.length >= BAL.baySlots;
-    this.setText(this.tx.bay, 218, STRIP_Y + 21, `Bay\n${st.bay.length}/${BAL.baySlots}`, bayFull ? T.gold : T.dim);
+    this.setText(this.tx.bay, BAY.x - 26, STRIP_Y + 21, `Bay\n${st.bay.length}/${BAL.baySlots}`, bayFull ? T.gold : T.dim);
     const flying = st.beams
       .filter((b) => b.status !== 'idle')
       .map((b) => (b.status === 'blocked' ? 1 : 1 - b.remaining / BAL.beamCountdown))
@@ -1492,21 +1504,21 @@ export class ShipScene extends Phaser.Scene {
     const idleN = st.beams.filter((b) => b.status === 'idle').length;
     const canFire = idleN > 0 && room > 0;
     const fireN = Math.min(idleN, room);
-    g.fillStyle(canFire ? C.beamDeep : C.panelEdge, 1).fillRoundedRect(16, ACTION.y, 210, ACTION.h, 23);
-    g.lineStyle(3, C.hullOutline, 1).strokeRoundedRect(16, ACTION.y, 210, ACTION.h, 23);
+    g.fillStyle(canFire ? C.beamDeep : C.panelEdge, 1).fillRoundedRect(FIRE.x, ACTION.y, FIRE.w, ACTION.h, 23);
+    g.lineStyle(3, C.hullOutline, 1).strokeRoundedRect(FIRE.x, ACTION.y, FIRE.w, ACTION.h, 23);
     const wait = Math.max(0, ...st.beams.filter((b) => b.status === 'counting').map((b) => b.remaining));
     const fireText = canFire
       ? (fireN > 1 ? `Fire ${fireN} beams` : 'Fire beam')
       : counting ? `Incoming ${wait.toFixed(1)}s` : `Bay full ${st.bay.length}/${BAL.baySlots}`;
-    this.setText(this.tx.fire, 121, ACTION.y + ACTION.h / 2, fireText, canFire ? '#0B1020' : T.dim);
+    this.setText(this.tx.fire, FIRE.x + FIRE.w / 2, ACTION.y + ACTION.h / 2, fireText, canFire ? '#0B1020' : T.dim);
 
     const val = sellValue(st);
     const canSell = val > 0;
     const cargoMode = sellMode(st) === 'cargo';
     const sellPulse = canSell && goalId === 'sell' ? 0.6 + 0.4 * Math.sin(now * 6) : 1;
-    g.fillStyle(canSell ? C.crit : C.panelEdge, canSell ? sellPulse : 1).fillRoundedRect(238, ACTION.y, 136, ACTION.h, 23);
-    g.lineStyle(3, C.hullOutline, 1).strokeRoundedRect(238, ACTION.y, 136, ACTION.h, 23);
-    this.setText(this.tx.sell, 306, ACTION.y + ACTION.h / 2, canSell ? `${cargoMode ? 'Sell…' : 'Sell'} +${fmtNum(val)}` : cargoMode ? 'Sell…' : 'Sell', canSell ? '#0B1020' : T.dim);
+    g.fillStyle(canSell ? C.crit : C.panelEdge, canSell ? sellPulse : 1).fillRoundedRect(SELL.x, ACTION.y, SELL.w, ACTION.h, 23);
+    g.lineStyle(3, C.hullOutline, 1).strokeRoundedRect(SELL.x, ACTION.y, SELL.w, ACTION.h, 23);
+    this.setText(this.tx.sell, SELL.x + SELL.w / 2, ACTION.y + ACTION.h / 2, canSell ? `${cargoMode ? 'Sell…' : 'Sell'} +${fmtNum(val)}` : cargoMode ? 'Sell…' : 'Sell', canSell ? '#0B1020' : T.dim);
     this.setText(this.tx.hp, -100, -100, '');
     this.drawArrows(g);
   }
@@ -1524,7 +1536,7 @@ export class ShipScene extends Phaser.Scene {
 
   /** The Smash button on the stage: gives the stage rock to the Smasher. Orange like the Smasher tile. */
   private drawSend(g: Phaser.GameObjects.Graphics, st: GameState): void {
-    const x = 290, y = STAGE.cy - 28, w = 76, h = 56;
+    const x = SMASH.x, y = STAGE.cy - 28, w = SMASH.w, h = SMASH.h;
     if (!st.smasher.repaired || !st.crusher.rock) {
       this.setText(this.tx.send, -100, -100, '');
       return;
