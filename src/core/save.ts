@@ -58,6 +58,10 @@ export function deserialize(raw: string | null): GameState {
         version: 4,
       };
     }
+    if (cur.version < 5) {
+      // v4 -> v5: savedAt for offline catch-up. 0 means "unknown", so an old save earns no offline time.
+      cur = { ...cur, savedAt: cur.savedAt ?? 0, version: 5 };
+    }
     data.version = cur.version;
     return { ...createInitialState(), ...cur } as GameState;
   } catch {

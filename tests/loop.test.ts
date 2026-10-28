@@ -189,13 +189,13 @@ describe('sell and goals', () => {
 });
 
 describe('save migration', () => {
-  it('upgrades a v1 save through to v4 and keeps credits, items and hull', () => {
+  it('upgrades a v1 save through to v5 and keeps credits, items and hull', () => {
     const v1 = JSON.stringify({
       version: 1, credits: 321, items: { ore: 5 },
       ship: { hullId: 'tug', ownedCells: ['2,0', '2,1', '2,2', '1,2'] },
     });
     const s = deserialize(v1);
-    expect(s.version).toBe(4);
+    expect(s.version).toBe(5);
     expect(s.credits).toBe(321);
     expect(s.items.ore).toBe(5);
     expect(s.items.ice).toBe(0);

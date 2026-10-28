@@ -8,7 +8,9 @@ import {
   toggleSmelter, upgradeBeam, upgradeHand, upgradeSmasher, upgradeSmelter, weakActive,
 } from '../core/loop';
 import { freeCells, freeEdgeCells, isEdgeCell, moduleCost, placeModule } from '../core/modules';
+import { applyOffline, stamp, type OfflineReport } from '../core/offline';
 import { SELLABLE, sellValue } from '../core/reserve';
+import { readyUpgrades } from '../core/upgrades';
 import { loadFromStorage, saveToStorage } from '../core/save';
 import { createInitialState } from '../core/state';
 import type { Cell, Cost, GameEvent, GameState, ModuleId } from '../core/types';
@@ -39,6 +41,7 @@ const SMELTER_COLOR = 0xb4552f;
 
 type SheetRow =
   | { t: 'text'; text: string; color?: string }
+  | { t: 'button'; label: string; fn: () => void }
   | { t: 'card'; title: string; sub: string; verb: string; cost: string; can: boolean; fn: () => void };
 
 export class ShipScene extends Phaser.Scene {
@@ -59,6 +62,7 @@ export class ShipScene extends Phaser.Scene {
   private shipLabels: Phaser.GameObjects.Text[] = []; // pooled tile labels inside the zoomed ship (beams 0-2, Smelter 3)
   private sheetBuild?: () => { title: string; rows: SheetRow[] };
   private sheetKind = '';
+  private sheetScroll = 0;
   private holdPointer: Phaser.Input.Pointer | null = null;
   private sheet?: Phaser.GameObjects.Container;
   private forceGeode = false;
@@ -91,8 +95,14 @@ export class ShipScene extends Phaser.Scene {
     this.redraw();
     if (this.debug) (window as unknown as { __ship: ShipScene }).__ship = this; // for scripted tests
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) saveToStorage(this.state);
+      if (document.hidden) {
+        this.endHold();
+        this.persist(); // stamps "last seen" so the time away can be counted
+      } else {
+        this.catchUp(); // iOS freezes the page in the background, so catch up when it wakes
+      }
     });
+    this.catchUp();
   }
 
   update(_time: number, delta: number): void {
@@ -107,7 +117,7 @@ export class ShipScene extends Phaser.Scene {
     this.saveTimer += dt;
     if (this.saveTimer > 5) {
       this.saveTimer = 0;
-      saveToStorage(this.state);
+      this.persist();
     }
     this.drawDynamic();
   }
@@ -141,6 +151,50 @@ export class ShipScene extends Phaser.Scene {
     this.state = releaseHold(this.state).state;
   }
 
+  /** Save, stamping the time so a later visit knows how long the player was away. */
+  private persist(): void {
+    this.state = stamp(this.state, Date.now());
+    saveToStorage(this.state);
+  }
+
+  /** Count the time since the game was last seen (offline catch-up) and greet the player. */
+  private catchUp(): void {
+    const r = applyOffline(this.state, Date.now());
+    this.state = r.state;
+    saveToStorage(this.state);
+    if (!r.report) return;
+    this.redraw();
+    this.showWelcomeBack(r.report);
+  }
+
+  /** Debug only: pretend the player was away for `sec` seconds. */
+  debugAway(sec: number): void {
+    this.state = { ...this.state, savedAt: Date.now() - sec * 1000 };
+    this.catchUp();
+  }
+
+  private showWelcomeBack(r: OfflineReport): void {
+    const dur = (sec: number): string => {
+      const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+      return h > 0 ? `${h}h ${m}m` : `${Math.max(1, m)}m`;
+    };
+    const names: Record<string, string> = { ore: 'Ore', ice: 'Ice', plate: 'Plate', coolant: 'Coolant', circuit: 'Circuit', core_shard: 'Shard' };
+    const gains = Object.entries(r.items).filter(([, v]) => (v ?? 0) > 0).map(([k, v]) => `${(v ?? 0) > 0 ? '+' : ''}${Math.round(v ?? 0)} ${names[k]}`);
+    this.showSheet('welcome', () => {
+      const rows: SheetRow[] = [{ t: 'text', text: `You were away ${dur(r.awaySec)}.${r.capped ? ' Time away counts up to 8 hours.' : ''}`, color: T.text }];
+      if (r.rocksSmashed > 0 || gains.length > 0) {
+        const parts = [r.rocksSmashed > 0 ? `The Smasher cleared ${r.rocksSmashed} rocks.` : '', gains.join(' · ')].filter(Boolean);
+        rows.push({ t: 'text', text: parts.join(' '), color: T.gold });
+      }
+      if (r.smasherRusty) rows.push({ t: 'text', text: 'Repair the Smasher and your ship keeps working while you are away.' });
+      else if (r.geodeWaiting) rows.push({ t: 'text', text: 'A geode is waiting in the stage. Only your hands can crack it, and it holds up the beams until you do.' });
+      else if (r.rocksSmashed === 0 && gains.length === 0) rows.push({ t: 'text', text: 'Nothing happened while you were away. Fire the beams to give the Smasher rocks.' });
+      rows.push({ t: 'text', text: 'While you are away the ship works at 30% for the first 2 hours, then 10%, up to 8 hours. Nothing is sold for you.' });
+      rows.push({ t: 'button', label: 'Back to work', fn: () => this.closeSheet() });
+      return { title: 'Welcome back', rows };
+    });
+  }
+
   private txt(x: number, y: number, text: string, style: Phaser.Types.GameObjects.Text.TextStyle): Phaser.GameObjects.Text {
     return this.add.text(x, y, text, { ...style, resolution: DPR });
   }
@@ -148,7 +202,7 @@ export class ShipScene extends Phaser.Scene {
   // ---- state -------------------------------------------------------------
   private apply(next: GameState): void {
     this.state = next;
-    saveToStorage(next);
+    this.persist();
     this.redraw();
   }
 
@@ -459,6 +513,12 @@ export class ShipScene extends Phaser.Scene {
     const workshop = this.sheetKind === 'workshop';
     tab(W * 0.25, 'Ship', !workshop);
     tab(W * 0.75, 'Build', workshop);
+    if (!workshop && readyUpgrades(this.state) > 0) {
+      const dot = this.add.graphics();
+      dot.fillStyle(C.space, 1).fillCircle(W * 0.75 + 20, H - 68, 9);
+      dot.fillStyle(C.crit, 1).fillCircle(W * 0.75 + 20, H - 68, 6.5);
+      this.hud.add(dot);
+    }
   }
 
   private showToast(msg: string): void {
@@ -527,7 +587,7 @@ export class ShipScene extends Phaser.Scene {
     this.endHold();
     const out = sendToSmasher(this.state);
     this.state = out.state;
-    saveToStorage(this.state);
+    this.persist();
     this.handleEvents(out.events, STAGE.cx, STAGE.cy);
     this.redraw();
   }
@@ -547,6 +607,7 @@ export class ShipScene extends Phaser.Scene {
   private showSheet(kind: string, build: () => { title: string; rows: SheetRow[] }): void {
     this.sheet?.destroy(true);
     const changed = this.sheetKind !== kind;
+    if (changed) this.sheetScroll = 0;
     this.sheetKind = kind;
     this.sheetBuild = build;
     const { title, rows } = build();
@@ -570,49 +631,118 @@ export class ShipScene extends Phaser.Scene {
         const a = this.txt(X, 0, row.text, { fontFamily: FONT, fontSize: '15px', color: row.color ?? T.dim, wordWrap: { width: WID } });
         return { row, a, b: undefined as Phaser.GameObjects.Text | undefined, h: a.height + 14 };
       }
+      if (row.t === 'button') return { row, a: undefined, b: undefined, h: 70 };
       const a = this.txt(X, 0, row.title, { fontFamily: FONT, fontSize: '17px', fontStyle: '600', color: T.text, wordWrap: { width: TXT_W } });
       const b = this.txt(X, 0, row.sub, { fontFamily: FONT, fontSize: '13px', color: T.dim, wordWrap: { width: TXT_W } });
       return { row, a, b, h: Math.max(68, a.height + b.height + 20) };
     });
     const bodyH = laid.reduce((n, l) => n + l.h, 0);
-    const panelH = Math.min(BOTTOM - 130, HEAD + bodyH + 16);
+    const panelH = Math.min(BOTTOM - 110, HEAD + bodyH + 16);
     const panelY = BOTTOM - panelH;
+    const viewTop = panelY + HEAD - 4, viewBottom = panelY + panelH - 10;
+    const maxScroll = Math.max(0, bodyH - (viewBottom - (panelY + HEAD)));
+    this.sheetScroll = Math.min(Math.max(0, this.sheetScroll), maxScroll);
+
     const panel = this.add.graphics();
     panel.fillStyle(C.panel, 1).fillRoundedRect(16, panelY, 358, panelH, 26);
     panel.lineStyle(3, C.panelEdge, 1).strokeRoundedRect(16, panelY, 358, panelH, 26);
     const absorb = this.add.zone(W / 2, panelY + panelH / 2, 358, panelH).setInteractive();
-    absorb.on('pointerdown', () => undefined);
     box.add([panel, absorb]);
     box.add(this.txt(X, panelY + 18, title, { fontFamily: FONT, fontSize: '22px', fontStyle: '600', color: T.text }));
+    // scrolling body: everything below the header lives in `body`, clipped to the panel
+    const body = this.add.container(0, -this.sheetScroll);
+    box.add(body);
+    const clip = this.make.graphics({ x: 0, y: 0 }, false);
+    clip.fillStyle(0xffffff, 1).fillRect(16, viewTop, 358, viewBottom - viewTop);
+    body.setMask(clip.createGeometryMask());
+    const bar = this.add.graphics();
+    box.add(bar);
     const close = this.txt(W - 40, panelY + 22, 'Close', { fontFamily: FONT, fontSize: '15px', color: T.dim }).setOrigin(1, 0).setInteractive();
     close.on('pointerdown', () => this.closeSheet());
-    box.add(close);
+    box.add(close); // after the body so scrolled rows can never sit on top of it
+    const zones: { z: Phaser.GameObjects.Zone; top: number; bottom: number }[] = [];
+    const syncZones = () => {
+      for (const r of zones) {
+        const top = r.top - this.sheetScroll, bottom = r.bottom - this.sheetScroll;
+        const visible = bottom > viewTop && top < viewBottom;
+        if (r.z.input && r.z.input.enabled !== visible) r.z.input.enabled = visible; // off-screen rows must not eat taps
+      }
+    };
+    const drawBar = () => {
+      bar.clear();
+      if (maxScroll <= 0) return;
+      const trackH = viewBottom - viewTop - 8;
+      const h = Math.max(30, trackH * ((viewBottom - viewTop) / (bodyH + 4)));
+      const y = viewTop + 4 + (trackH - h) * (this.sheetScroll / maxScroll);
+      bar.fillStyle(C.ghost, 0.7).fillRoundedRect(366, y, 4, h, 2);
+    };
+    const setScroll = (v: number) => {
+      this.sheetScroll = Math.min(Math.max(0, v), maxScroll);
+      body.y = -this.sheetScroll;
+      drawBar();
+      syncZones();
+    };
+    drawBar();
+
+    // drag to scroll; a press that moved is a drag, not a tap on a button
+    let drag: { y0: number; s0: number } | null = null;
+    let moved = false;
+    const begin = (p: Phaser.Input.Pointer) => { drag = { y0: p.worldY, s0: this.sheetScroll }; moved = false; };
+    const onMove = (p: Phaser.Input.Pointer) => {
+      if (!drag || !p.isDown) { drag = null; return; }
+      const dy = p.worldY - drag.y0;
+      if (Math.abs(dy) > 6) moved = true;
+      if (moved && maxScroll > 0) setScroll(drag.s0 - dy);
+    };
+    const onWheel = (_p: Phaser.Input.Pointer, _o: unknown, _dx: number, dy: number) => { if (maxScroll > 0) setScroll(this.sheetScroll + dy * 0.5); };
+    absorb.on('pointerdown', begin);
+    this.input.on('pointermove', onMove);
+    this.input.on('wheel', onWheel);
+    box.once('destroy', () => {
+      this.input.off('pointermove', onMove);
+      this.input.off('wheel', onWheel);
+      clip.destroy();
+    });
+    const tapOk = (p: Phaser.Input.Pointer) => !moved && p.worldY >= viewTop && p.worldY <= viewBottom;
 
     let y = panelY + HEAD;
     for (const l of laid) {
       if (l.row.t === 'text') {
-        l.a.setY(y);
-        box.add(l.a);
+        l.a!.setY(y);
+        body.add(l.a!);
+      } else if (l.row.t === 'button') {
+        const row = l.row;
+        const g = this.add.graphics();
+        g.fillStyle(C.crit, 1).fillRoundedRect(X, y + 8, WID, 52, 26);
+        const lab = this.txt(W / 2, y + 34, row.label, { fontFamily: FONT, fontSize: '18px', fontStyle: '600', color: '#0B1020' }).setOrigin(0.5);
+        const z = this.add.zone(W / 2, y + 34, WID, 52).setInteractive();
+        z.on('pointerdown', begin);
+        z.on('pointerup', (p: Phaser.Input.Pointer) => { if (tapOk(p)) row.fn(); });
+        zones.push({ z, top: y + 8, bottom: y + 60 });
+        body.add([g, lab, z]);
       } else {
         const row = l.row;
-        l.a.setY(y + 6);
-        l.b!.setY(y + 6 + l.a.height + 2);
+        l.a!.setY(y + 6);
+        l.b!.setY(y + 6 + l.a!.height + 2);
         const bx = X + WID - BTN_W, by = y + (l.h - 48) / 2;
         const g = this.add.graphics();
         g.fillStyle(row.can ? C.crit : C.panelEdge, 1).fillRoundedRect(bx, by, BTN_W, 48, 16);
         g.lineStyle(1, C.panelEdge, 1).lineBetween(X, y + l.h - 1, X + WID, y + l.h - 1);
         const ink = row.can ? '#0B1020' : T.dim;
         const verb = this.txt(bx + BTN_W / 2, by + (row.cost ? 14 : 24), row.verb, { fontFamily: FONT, fontSize: '16px', fontStyle: '600', color: ink }).setOrigin(0.5);
-        box.add([g, l.a, l.b!, verb]);
+        body.add([g, l.a!, l.b!, verb]);
         if (row.cost) {
-          box.add(this.txt(bx + BTN_W / 2, by + 34, row.cost, { fontFamily: FONT, fontSize: '12px', color: ink, align: 'center' }).setOrigin(0.5));
+          body.add(this.txt(bx + BTN_W / 2, by + 34, row.cost, { fontFamily: FONT, fontSize: '12px', color: ink, align: 'center' }).setOrigin(0.5));
         }
         const z = this.add.zone(bx + BTN_W / 2, by + 24, BTN_W, 48).setInteractive();
-        z.on('pointerdown', row.fn);
-        box.add(z);
+        z.on('pointerdown', begin);
+        z.on('pointerup', (p: Phaser.Input.Pointer) => { if (tapOk(p)) row.fn(); });
+        zones.push({ z, top: by, bottom: by + 48 });
+        body.add(z);
       }
       y += l.h;
     }
+    syncZones();
     return box;
   }
 
@@ -649,7 +779,7 @@ export class ShipScene extends Phaser.Scene {
       rows.push(this.upgradeCard(`Hand Tools · ${hl.name}`, hn ? `Next: ${hn.name}. ${hn.blurb}` : '', nextHandUpgrade(st), () => upgradeHand(this.state), 'Tools upgraded'));
       st.beams.forEach((b, i) => {
         const nx = BEAM.levels[b.level];
-        const name = st.beams.length > 1 ? `Tractor Beam ${i + 1}` : 'Tractor Beam';
+        const name = st.beams.length > 1 ? `Beam ${i + 1}` : 'Tractor Beam';
         rows.push(this.upgradeCard(
           `${name} · ${BEAM.levels[b.level - 1].name}`,
           nx ? `Next: ${nx.name}. Rocks carry ${Math.round((nx.oreMul - 1) * 100)}% more Ore.` : '',

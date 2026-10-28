@@ -278,7 +278,7 @@ describe('selling and reserved materials', () => {
   });
 });
 
-describe('save v3 -> v4', () => {
+describe('save v3 -> v5', () => {
   it('adds modules, smelter, hand level, beam levels and keeps progress; idempotent', () => {
     const v3 = createInitialState() as unknown as Record<string, unknown>;
     const old = {
@@ -289,7 +289,7 @@ describe('save v3 -> v4', () => {
       smasher: { repaired: true, level: 2, queue: [] },
     };
     const s = deserialize(JSON.stringify(old));
-    expect(s.version).toBe(4);
+    expect(s.version).toBe(5);
     expect(s.credits).toBe(777);
     expect(s.ship.modules.map((m) => m.defId)).toEqual(['beam', 'smasher']);
     expect(s.ship.ownedCells).toHaveLength(4);
@@ -300,5 +300,18 @@ describe('save v3 -> v4', () => {
     expect(s.stats.rocks).toBe(12);
     expect(s.smasher).toEqual({ repaired: true, level: 2, queue: [] });
     expect(deserialize(JSON.stringify(s))).toEqual(s);
+  });
+});
+
+describe('upgrade-ready dot', () => {
+  it('counts affordable Workshop purchases', async () => {
+    const { readyUpgrades } = await import('../src/core/upgrades');
+    const s = createInitialState();
+    expect(readyUpgrades({ ...s, credits: 0 })).toBe(0);
+    expect(readyUpgrades({ ...s, credits: 25 })).toBe(1); // beam 25
+    expect(readyUpgrades({ ...s, credits: 40 })).toBe(2); // beam + hand
+    expect(readyUpgrades({ ...s, credits: 40, items: { ...s.items, plate: 8 } })).toBe(3); // + Smasher repair
+    const maxed = { ...s, credits: 9999, handLevel: 4, beams: [{ status: 'idle' as const, remaining: 0, level: 4 }] };
+    expect(readyUpgrades(maxed)).toBe(0);
   });
 });

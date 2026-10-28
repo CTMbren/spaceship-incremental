@@ -21,10 +21,11 @@ Bot pacing after the retune (m:ss reached; casual re-taps every 2.5 s and uses t
 
 - Visual update (ship view): the ship is drawn at 1.5x, runs left to right with the nose on the left (presentation only; hull data and saves unchanged, template (x, y) maps to screen column = y, row = x). When the ship plus buy slots no longer fit, small arrows appear on the edges (hold to scroll; buying a tile scrolls it into view); the view is clipped to its own area. New exterior in `src/game/hullArt.ts`: seam-free hull body, nose cone with canopy, engine bells on exposed rear cells, swept fins on the finished hull's top and bottom edges, orange accent stripe, rim light and rivets, all derived from owned tiles. Layout maths in `src/game/shipLayout.ts` (pure, 11 tests). 63 tests.
 
+- Day 6 (offline catch-up, welcome-back, Workshop polish; save v5): `src/core/offline.ts` fast-forwards the real rules while you are away: the ship works at **30% for the first 2 hours, 10% up to 8 hours, nothing after** (`src/data/offline.ts`). Hands-free play means beams fire, rocks go to the Smasher, the Smelter runs, no geodes arrive, nothing is sold, and a Rusty Smasher means only held Ore gets smelted. Away under 2 minutes counts for nothing. The game stamps `savedAt` on every save and catches up on launch and when the tab wakes (iOS freezes background pages); a **Welcome back** sheet reports time away, rocks cleared and items gained, and says why when there is nothing (Rusty Smasher, geode waiting, nothing to do). Sheets now **scroll** (drag or wheel) with a scroll bar, a gold **dot on the Build tab** shows when any Workshop purchase is affordable, and beam rows read "Beam 2 · Winch Line". Debug: `window.__ship.debugAway(sec)`. Save v5 (old saves earn no offline time once). 104 tests.
+
 ## Next
-1. Day 6: offline catch-up tiers (0-2 h 30%, 2-8 h 10%, cap 8 h) + welcome-back modal; Build/Workshop polish (upgrade-ready dot, sheet scroll if it grows); fix anything from the Day 5 playtest.
-2. Day 7 (playtest gate): core loop, layout and module placement on Brendan's phone. Optional UI planning session (structure only) before it. Then decide whether to start Milestone 2 (Days 8-12).
-3. Tile 10+ needs Ice (not in the game yet), so the bot and the hull stop at 9 tiles until Ice arrives with the Grapple Beam / Day 8+ work.
+1. Day 7 (playtest gate): core loop, layout and module placement on Brendan's phone. Optional UI planning session (structure only) before it. Then decide whether to start Milestone 2 (Days 8-12).
+2. Tile 10+ needs Ice (not in the game yet), so the bot and the hull stop at 9 tiles until Ice arrives with the Grapple Beam / Day 8+ work.
 
 ## Planned: Milestone 2 (planning only, see `docs/travel-shop-rover-jump-plan.md`)
 Travel along a system route (Engine, nodes, offline travel), Rover expeditions at planets, three shops (Workshop, Station Trader, Flux Exchange), Jump as shockwave damage with Braces instead of a reset, more modules. Proposed order: Days 8 to 12 after the Day 7 core-loop and layout playtest gate. Open decisions for Brendan are in section 9 of that doc.
@@ -36,7 +37,8 @@ Travel along a system route (Engine, nodes, offline travel), Rover expeditions a
 - Modules cannot be moved or sold yet (Day 7+); a wrongly placed module stays. Module art is still labelled squares. Adjacency for Smasher auto-intake is assumed, not checked.
 - Saves with 10+ rocks migrate (v1/v2) as already repaired; use `?debug` [reset] to see the Rusty start. The very first Sell sells everything (tutorial); later sells keep goal materials.
 - A finger held on the centre of the rock often lands the weak-point crit (-6 heat), so heat rarely jams; watch in playtest.
-- Frame time is capped at 0.25 s, so on a very slow device the game runs slower than real time (offline catch-up comes Day 6).
+- Frame time is capped at 0.25 s, so on a very slow device the game runs slower than real time while the app is open.
+- Offline: with nothing reserved, the Smelter turns all held Ore into Plate while you are away, so you come back with Plate. Offline income needs a repaired Smasher and at least one idle beam fired by hand at least once. If the offline numbers feel too generous or too stingy, the knobs are `src/data/offline.ts` (rates, cap, 2 min minimum).
 - No sound or haptics yet (iOS Chrome does not support vibration).
 - Fonts load from Google Fonts; if blocked the system font is used.
 - Layout: hull in the upper half, crush stage panel, Heat + Bay strip, Fire and Sell buttons, tab bar (Build tab opens the Workshop).

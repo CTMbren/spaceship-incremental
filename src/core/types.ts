@@ -120,6 +120,8 @@ export interface GameState {
   /** Geodes opened since the last guaranteed Core Shard. Persists across Jump. */
   pity: number;
   flags: { tappedBeam: boolean; usedHold: boolean };
+  /** Epoch ms the game was last seen (stamped by the scene when saving); 0 = never. Drives offline catch-up. */
+  savedAt: number;
 }
 
 export type GameEvent =
