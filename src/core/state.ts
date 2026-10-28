@@ -3,7 +3,7 @@ import { HULL_TUG } from '../data/hulls';
 import { cellKey } from './hull';
 import type { GameState, ItemId } from './types';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 export const ITEM_IDS: readonly ItemId[] = ['ore', 'ice', 'plate', 'coolant', 'circuit', 'core_shard'];
 
 export function createInitialState(seed = 1): GameState {
@@ -12,13 +12,22 @@ export function createInitialState(seed = 1): GameState {
     version: SAVE_VERSION,
     credits: BAL.startCredits,
     items,
-    ship: { hullId: HULL_TUG.id, ownedCells: HULL_TUG.startCells.map(cellKey) },
+    ship: {
+      hullId: HULL_TUG.id,
+      ownedCells: HULL_TUG.startCells.map(cellKey),
+      modules: [
+        { uid: 1, defId: 'beam', cell: '2,0' },
+        { uid: 2, defId: 'smasher', cell: '2,1' },
+      ],
+    },
     rng: seed,
-    beams: [{ status: 'idle', remaining: 0 }],
+    beams: [{ status: 'idle', remaining: 0, level: 1 }],
     bay: [],
     crusher: { rock: null, heat: 0, lockout: 0, holding: false, holdT: 0, holdAcc: 0, weakT: 0, weakX: 0, weakY: 0 },
     smasher: { repaired: false, level: 1, queue: [] },
-    stats: { rocks: 0, geodes: 0, sold: 0, taps: 0, holdTicks: 0, sent: 0, smashed: 0, overheats: 0 },
+    smelter: { built: false, level: 1, on: true, progress: 0 },
+    handLevel: 1,
+    stats: { rocks: 0, geodes: 0, sold: 0, taps: 0, holdTicks: 0, sent: 0, smashed: 0, overheats: 0, smelted: 0 },
     pity: 0,
     flags: { tappedBeam: false, usedHold: false },
   };

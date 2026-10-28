@@ -44,12 +44,12 @@ describe('Rusty Smasher and repair', () => {
   it('repair needs the materials, then spends them and repairs once', () => {
     const s = createInitialState();
     expect(repairSmasher(s)).toEqual({ ok: false, reason: 'need_items' });
-    const rich = { ...s, items: { ...s.items, ore: 30 } };
+    const rich = { ...s, items: { ...s.items, plate: 10 } };
     const r = repairSmasher(rich);
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.state.smasher.repaired).toBe(true);
-      expect(r.state.items.ore).toBe(30 - 24);
+      expect(r.state.items.plate).toBe(10 - 8);
       expect(repairSmasher(r.state)).toEqual({ ok: false, reason: 'already' });
     }
   });
@@ -127,7 +127,7 @@ describe('Smasher working', () => {
 });
 
 describe('auto-intake (Smasher L2+)', () => {
-  const beamDone = (s: GameState): GameState => ({ ...s, beams: [{ status: 'counting', remaining: 0.01 }] });
+  const beamDone = (s: GameState): GameState => ({ ...s, beams: [{ status: 'counting', remaining: 0.01, level: 1 }] });
   it('L1: rocks go to the Bay, never the queue', () => {
     const s = tick(beamDone(base({ crusher: { ...createInitialState().crusher, rock: null } })), 0.1).state;
     expect(s.smasher.queue).toHaveLength(0);

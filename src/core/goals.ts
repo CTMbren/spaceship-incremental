@@ -1,5 +1,9 @@
 import { SMASHER } from '../data/smasher';
-import type { GameState } from './types';
+import { MODULES } from '../data/modules';
+import { HULLS } from '../data/hulls';
+import { nextTileCost } from './hull';
+import { structureGoal } from './reserve';
+import type { Cost, GameState } from './types';
 
 export interface Goal {
   id: string;
@@ -7,19 +11,34 @@ export interface Goal {
   text: string;
 }
 
-const costText = (items: Partial<Record<string, number>> | undefined, credits: number): string =>
-  [credits > 0 ? `${credits} credits` : '', ...Object.entries(items ?? {}).map(([k, v]) => `${v} ${k === 'core_shard' ? 'Shard' : k[0].toUpperCase() + k.slice(1)}`)]
+export const costText = (cost: Cost): string =>
+  [
+    cost.credits > 0 ? `${cost.credits} credits` : '',
+    ...Object.entries(cost.items ?? {}).map(([k, v]) => `${v} ${k === 'core_shard' ? 'Shard' : k[0].toUpperCase() + k.slice(1)}`),
+  ]
     .filter(Boolean)
     .join(' · ');
 
-/** The current tutorial goal, or null once the early chain is done (the hull goal takes over). */
+/**
+ * The current tutorial goal, or null once the early chain is done (the hull goal takes over):
+ * tap beam, crush, sell, Smelter, repair the Smasher, send a rock, second beam (or the tile it needs).
+ */
 export function currentGoal(s: GameState): Goal | null {
   if (!s.flags.tappedBeam) return { id: 'tap-beam', text: 'Tap the beam' };
   if (s.stats.rocks < 1) return { id: 'crush', text: 'Crush the rock' };
   if (s.stats.sold < 1) return { id: 'sell', text: 'Sell your Ore' };
-  if (!s.smasher.repaired) {
-    return { id: 'repair', text: `Fix the rusty Smasher · ${costText(SMASHER.repair.items, SMASHER.repair.credits)}` };
+  const sg = structureGoal(s);
+  if (!s.smelter.built) {
+    if (sg?.id === 'smelter') return { id: 'smelter', text: `Build a Smelter · ${costText(MODULES.smelter.cost)}` };
+    return sg ? { id: 'expand', text: `Expand hull · ${costText(sg.cost)}` } : null;
   }
+  if (!s.smasher.repaired) return { id: 'repair', text: `Fix the rusty Smasher · ${costText(SMASHER.repair)}` };
   if (s.stats.sent < 1) return { id: 'send', text: 'Send a rock to the Smasher' };
+  if (s.beams.length < 2) {
+    if (sg?.id === 'beam2') return { id: 'beam2', text: `Add a second beam · ${costText(sg.cost)}` };
+    const def = HULLS[s.ship.hullId];
+    const tile = def ? nextTileCost(def, s.ship.ownedCells.length) : null;
+    return tile ? { id: 'expand', text: `Expand hull · ${costText(tile)}` } : null;
+  }
   return null;
 }

@@ -43,6 +43,21 @@ export function deserialize(raw: string | null): GameState {
         version: 3,
       };
     }
+    if (cur.version < 4) {
+      // v3 -> v4: modules on tiles, Smelter, Hand Tools level, beam levels, more stats.
+      const fresh = createInitialState();
+      const ship = cur.ship ?? fresh.ship;
+      cur = {
+        ...fresh,
+        ...cur,
+        ship: { ...ship, modules: ship.modules ?? fresh.ship.modules },
+        beams: (cur.beams ?? fresh.beams).map((b) => ({ ...b, level: b.level ?? 1 })),
+        smelter: cur.smelter ?? fresh.smelter,
+        handLevel: cur.handLevel ?? fresh.handLevel,
+        stats: { ...fresh.stats, ...(cur.stats ?? {}) },
+        version: 4,
+      };
+    }
     data.version = cur.version;
     return { ...createInitialState(), ...cur } as GameState;
   } catch {

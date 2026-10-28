@@ -22,10 +22,21 @@ export interface HullDef {
   tileCosts: Cost[];
 }
 
+export type ModuleId = 'beam' | 'smasher' | 'smelter';
+
+/** A module sitting on one owned tile (1x1 modules only until Day 7 adds footprints). */
+export interface ModuleInstance {
+  uid: number;
+  defId: ModuleId;
+  /** Owned-cell key "x,y". */
+  cell: string;
+}
+
 export interface ShipState {
   hullId: string;
   /** Owned cells as "x,y" keys. Plain data so it saves with JSON.stringify. */
   ownedCells: string[];
+  modules: ModuleInstance[];
 }
 
 export interface Rock {
@@ -40,6 +51,8 @@ export interface BeamState {
   /** idle: waiting for a tap. counting: countdown running. blocked: arrived but the Bay is full. */
   status: 'idle' | 'counting' | 'blocked';
   remaining: number;
+  /** Tractor Beam level 1..4: richer rocks. Beam i belongs to the i-th beam module. */
+  level: number;
 }
 
 export interface CrusherState {
@@ -67,6 +80,15 @@ export interface SmasherState {
   queue: Rock[];
 }
 
+export interface SmelterState {
+  built: boolean;
+  level: number; // 1..4
+  /** Player switch: when off the Smelter leaves Ore alone. */
+  on: boolean;
+  /** Progress through the current batch, 0..1. */
+  progress: number;
+}
+
 export interface Stats {
   rocks: number;
   geodes: number;
@@ -76,6 +98,7 @@ export interface Stats {
   sent: number;
   smashed: number;
   overheats: number;
+  smelted: number;
 }
 
 export interface GameState {
@@ -90,6 +113,9 @@ export interface GameState {
   /** The stage (hand-crushing) state. Named crusher for historical reasons. */
   crusher: CrusherState;
   smasher: SmasherState;
+  smelter: SmelterState;
+  /** Hand Tools level 1..4 (Workshop). */
+  handLevel: number;
   stats: Stats;
   /** Geodes opened since the last guaranteed Core Shard. Persists across Jump. */
   pity: number;
@@ -105,6 +131,9 @@ export type GameEvent =
   | { kind: 'sent' }
   | { kind: 'smashed'; ore: number }
   | { kind: 'repaired' }
+  | { kind: 'smelted'; plate: number }
+  | { kind: 'built'; module: ModuleId }
+  | { kind: 'upgraded'; what: 'beam' | 'smelter' | 'smasher' | 'hand'; level: number }
   | { kind: 'smasher_upgraded'; level: number }
   | { kind: 'crushed'; ore: number; geode: boolean; credits: number; shard: boolean }
   | { kind: 'sold'; item: ItemId; qty: number; credits: number };

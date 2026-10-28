@@ -8,7 +8,7 @@ export const BAL = {
   geode: {
     rate: 0.08, // chance any rock is a geode
     hpMul: 1.5,
-    jackpotOreMul: 19, // credits = ore * oreprice * this (about 76)
+    jackpotOreMul: 6, // credits = ore * oreprice * this (about 24; was 19 until the Day 5 pacing sim)
     shardChance: 0.04,
     pity: 12, // every 12th geode is guaranteed to hold a Core Shard
   },

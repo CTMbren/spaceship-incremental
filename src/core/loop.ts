@@ -1,8 +1,9 @@
 import { BAL, PRICES } from '../data/balance';
+import { HAND } from '../data/hand';
+import { BEAM, SMELTER } from '../data/modules';
 import { SMASHER } from '../data/smasher';
-import { HULLS } from '../data/hulls';
 import { canAfford } from './actions';
-import { nextTileCost } from './hull';
+import { availableQty, SELLABLE, smeltableQty } from './reserve';
 import { nextRandom } from './rng';
 import type { GameEvent, GameState, ItemId, Rock } from './types';
 
@@ -19,12 +20,16 @@ function rand(s: GameState): number {
   return v;
 }
 
-function makeRock(s: GameState, forceGeode?: boolean): Rock {
+function makeRock(s: GameState, forceGeode?: boolean, beamLevel = 1): Rock {
   const geode = forceGeode ?? rand(s) < BAL.geode.rate;
   const base = BAL.rock.dust;
   const hp = geode ? Math.ceil(base.hp * BAL.geode.hpMul) : base.hp;
-  return { kind: 'dust', geode, hp, maxHp: hp, ore: base.ore };
+  const ore = Math.round(base.ore * BEAM.levels[beamLevel - 1].oreMul);
+  return { kind: 'dust', geode, hp, maxHp: hp, ore };
 }
+
+/** Hand Tools effects at the player's current level. */
+export const handStats = (s: GameState) => HAND.levels[s.handLevel - 1];
 
 function newWeakPoint(s: GameState): void {
   const angle = rand(s) * Math.PI * 2;
@@ -51,6 +56,20 @@ export function tapBeam(state: GameState, index = 0): Outcome {
   return { state: s, events: [] };
 }
 
+/** The Fire button: start every idle beam at once (still locked while a rock is in the crush stage). */
+export function tapAllBeams(state: GameState): Outcome {
+  if (state.crusher.rock || !state.beams.some((b) => b.status === 'idle')) return { state, events: [] };
+  const s = clone(state);
+  for (const b of s.beams) {
+    if (b.status === 'idle') {
+      b.status = 'counting';
+      b.remaining = BAL.beamCountdown;
+    }
+  }
+  s.flags.tappedBeam = true;
+  return { state: s, events: [] };
+}
+
 // ---- time ------------------------------------------------------------------
 
 /** Advance the world by dt seconds. Pure; returns a new state. */
@@ -65,7 +84,7 @@ export function tick(state: GameState, dt: number, forceGeode?: boolean): Outcom
       if (beam.remaining <= 0) beam.status = 'blocked'; // try to deliver below
     }
     if (beam.status === 'blocked') {
-      const rock = makeRock(s, forceGeode);
+      const rock = makeRock(s, forceGeode, beam.level);
       const sm = s.smasher;
       const intake =
         sm.repaired &&
@@ -107,7 +126,8 @@ export function tick(state: GameState, dt: number, forceGeode?: boolean): Outcom
       newWeakPoint(s);
     }
   }
-  if (!c.holding) c.heat = Math.max(0, c.heat - BAL.heat.cool * dt);
+  const hand = handStats(s);
+  if (!c.holding) c.heat = Math.max(0, c.heat - hand.cool * dt);
   c.lockout = Math.max(0, c.lockout - dt);
   if (c.lockout > 0) {
     c.holding = false;
@@ -133,6 +153,31 @@ export function tick(state: GameState, dt: number, forceGeode?: boolean): Outcom
       }
     }
   }
+
+  // Smelter: turns Ore into Plate in batches, never touching Ore reserved for the current goal.
+  const sm = s.smelter;
+  if (sm.built && sm.on) {
+    const secPerBatch = SMELTER.levels[sm.level - 1].secPerBatch;
+    let t = dt;
+    while (t > 1e-12) {
+      if (smeltableQty(s, 'ore') < SMELTER.batchIn) {
+        sm.progress = 0; // starved: wait for Ore
+        break;
+      }
+      const need = (1 - sm.progress) * secPerBatch;
+      if (t >= need - 1e-9) {
+        t = Math.max(0, t - need);
+        s.items.ore -= SMELTER.batchIn;
+        s.items.plate += SMELTER.batchOut;
+        s.stats.smelted += SMELTER.batchOut;
+        sm.progress = 0;
+        events.push({ kind: 'smelted', plate: SMELTER.batchOut });
+      } else {
+        sm.progress += t / secPerBatch;
+        t = 0;
+      }
+    }
+  }
   return { state: s, events };
 }
 
@@ -149,14 +194,15 @@ function applyHit(s: GameState, nx: number, ny: number, kind: HitKind, events: G
 
   s.stats.taps += kind === 'tap' ? 1 : 0;
   s.stats.holdTicks += kind === 'hold' ? 1 : 0;
-  rock.hp -= crit ? BAL.weak.dmg : kind === 'hold' ? BAL.hold.dmg : BAL.tapDmg;
+  const hand = handStats(s);
+  rock.hp -= (crit ? BAL.weak.dmg : kind === 'hold' ? BAL.hold.dmg : BAL.tapDmg) * hand.dmgMul;
   const heat = kind === 'hold' ? BAL.heat.perHoldTick : BAL.heat.perTap;
   c.heat = Math.max(0, c.heat + (crit ? BAL.heat.onWeakHit : heat));
   events.push({ kind: 'hit', crit });
   if (crit) c.weakT = BAL.weak.active; // consume this weak point until the next cycle
 
-  if (c.heat >= BAL.heat.max) {
-    c.lockout = BAL.heat.lockout;
+  if (c.heat >= hand.heatMax) {
+    c.lockout = hand.lockout;
     c.heat = BAL.heat.resetTo;
     c.holding = false;
     c.holdT = 0;
@@ -173,7 +219,7 @@ function applyHit(s: GameState, nx: number, ny: number, kind: HitKind, events: G
     if (rock.geode) {
       s.stats.geodes += 1;
       s.pity += 1;
-      credits = Math.round(rock.ore * PRICES.ore * BAL.geode.jackpotOreMul);
+      credits = Math.round(rock.ore * PRICES.ore * BAL.geode.jackpotOreMul * hand.jackpotMul);
       s.credits += credits;
       if (s.pity >= BAL.geode.pity || rand(s) < BAL.geode.shardChance) {
         shard = true;
@@ -302,17 +348,6 @@ export function upgradeSmasher(state: GameState): SpendResult {
 
 // ---- selling -----------------------------------------------------------------------
 
-/** Ore the player should keep for the current structure goal (Smasher repair, then the next hull tile). */
-export function oreReserve(s: GameState): number {
-  if (s.stats.sold < 1) return 0; // the very first sell is the tutorial: sell everything
-  if (!s.smasher.repaired) return SMASHER.repair.items?.ore ?? 0;
-  const def = HULLS[s.ship.hullId];
-  return def ? (nextTileCost(def, s.ship.ownedCells.length)?.items?.ore ?? 0) : 0;
-}
-
-/** How much Ore the Sell button will sell right now. */
-export const sellableOre = (s: GameState): number => Math.max(0, Math.floor(s.items.ore) - oreReserve(s));
-
 /** Sell all (or qty) of an item at its base price. */
 export function sell(state: GameState, item: ItemId, qty?: number): Outcome {
   const have = Math.floor(state.items[item]);
@@ -324,4 +359,60 @@ export function sell(state: GameState, item: ItemId, qty?: number): Outcome {
   s.credits += credits;
   s.stats.sold += n;
   return { state: s, events: [{ kind: 'sold', item, qty: n, credits }] };
+}
+
+/** The Sell button: sell everything sellable except what the current goal needs. */
+export function sellAll(state: GameState): Outcome {
+  const s = clone(state);
+  const events: GameEvent[] = [];
+  for (const item of SELLABLE) {
+    const n = availableQty(state, item);
+    if (n <= 0) continue;
+    const credits = n * PRICES[item];
+    s.items[item] -= n;
+    s.credits += credits;
+    s.stats.sold += n;
+    events.push({ kind: 'sold', item, qty: n, credits });
+  }
+  return events.length ? { state: s, events } : { state, events: [] };
+}
+
+// ---- upgrades (credits buy speed) ----------------------------------------------------
+
+function levelUp(state: GameState, level: number, levels: readonly { cost: { credits: number } }[], apply: (s: GameState) => void, what: 'beam' | 'smelter' | 'smasher' | 'hand'): SpendResult {
+  const next = levels[level];
+  if (!next) return { ok: false, reason: 'max_level' };
+  const afford = canAfford(state, next.cost);
+  if (afford !== 'ok') return { ok: false, reason: afford };
+  const s = clone(state);
+  s.credits -= next.cost.credits;
+  apply(s);
+  return { ok: true, state: s, events: [{ kind: 'upgraded', what, level: level + 1 }] };
+}
+
+export const nextBeamUpgrade = (s: GameState, index: number) => BEAM.levels[(s.beams[index]?.level ?? 99)]?.cost;
+export const nextSmelterUpgrade = (s: GameState) => SMELTER.levels[s.smelter.level]?.cost;
+export const nextHandUpgrade = (s: GameState) => HAND.levels[s.handLevel]?.cost;
+
+export function upgradeBeam(state: GameState, index: number): SpendResult {
+  const beam = state.beams[index];
+  if (!beam) return { ok: false, reason: 'max_level' };
+  return levelUp(state, beam.level, BEAM.levels, (s) => { s.beams[index].level += 1; }, 'beam');
+}
+
+export function upgradeSmelter(state: GameState): SpendResult {
+  if (!state.smelter.built) return { ok: false, reason: 'need_items' };
+  return levelUp(state, state.smelter.level, SMELTER.levels, (s) => { s.smelter.level += 1; }, 'smelter');
+}
+
+export function upgradeHand(state: GameState): SpendResult {
+  return levelUp(state, state.handLevel, HAND.levels, (s) => { s.handLevel += 1; }, 'hand');
+}
+
+export function toggleSmelter(state: GameState): Outcome {
+  if (!state.smelter.built) return { state, events: [] };
+  const s = clone(state);
+  s.smelter.on = !s.smelter.on;
+  if (!s.smelter.on) s.smelter.progress = 0;
+  return { state: s, events: [] };
 }
