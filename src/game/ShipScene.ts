@@ -582,6 +582,8 @@ export class ShipScene extends Phaser.Scene {
       g.lineStyle(4, C.beam, 1).beginPath().arc(bcx, bcy, 18, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac, false).strokePath();
       g.lineStyle(4, C.hull, 0.35).strokeCircle(bcx, bcy, 18);
       beamLabel = String(Math.ceil(Math.max(0, beam.remaining)));
+    } else if (beam.status === 'idle' && c.rock) {
+      g.lineStyle(3, C.hull, 0.35).strokeRoundedRect(bp.x + 2, bp.y + 2, TILE - 4, TILE - 4, 10); // locked: rock in stage
     } else if (beam.status === 'idle') {
       const pulse = 0.55 + 0.45 * Math.sin(now * 5);
       g.lineStyle(3, C.crit, st.flags.tappedBeam ? 0.9 : pulse).strokeRoundedRect(bp.x + 2, bp.y + 2, TILE - 4, TILE - 4, 10);
@@ -653,10 +655,10 @@ export class ShipScene extends Phaser.Scene {
     }
 
     // --- action row: Fire + Sell
-    const ready = beam.status === 'idle';
+    const ready = beam.status === 'idle' && !c.rock;
     g.fillStyle(ready ? C.beamDeep : C.panelEdge, 1).fillRoundedRect(16, ACTION.y, 210, ACTION.h, 23);
     g.lineStyle(3, C.hullOutline, 1).strokeRoundedRect(16, ACTION.y, 210, ACTION.h, 23);
-    const fireText = beam.status === 'idle' ? 'Fire beam' : beam.status === 'counting' ? `Incoming ${Math.max(0, beam.remaining).toFixed(1)}s` : 'Bay full';
+    const fireText = beam.status === 'idle' ? (c.rock ? 'Rock in stage' : 'Fire beam') : beam.status === 'counting' ? `Incoming ${Math.max(0, beam.remaining).toFixed(1)}s` : 'Bay full';
     this.setText(this.tx.fire, 121, ACTION.y + ACTION.h / 2, fireText, ready ? '#0B1020' : T.dim);
 
     const ore = sellableOre(st);

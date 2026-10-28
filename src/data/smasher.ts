@@ -11,10 +11,10 @@ export const SMASHER = {
    */
   repair: { credits: 0, items: { ore: 24 } } as Cost,
   levels: [
-    { hpPerSec: 0.9, queue: 2, cost: { credits: 0 } as Cost },
-    { hpPerSec: 1.15, queue: 3, cost: { credits: 150 } as Cost },
-    { hpPerSec: 1.5, queue: 4, cost: { credits: 450 } as Cost },
-    { hpPerSec: 1.9, queue: 5, cost: { credits: 1350 } as Cost },
+    { hpPerSec: 2.25, queue: 2, cost: { credits: 0 } as Cost },
+    { hpPerSec: 2.875, queue: 3, cost: { credits: 150 } as Cost },
+    { hpPerSec: 3.75, queue: 4, cost: { credits: 450 } as Cost },
+    { hpPerSec: 4.75, queue: 5, cost: { credits: 1350 } as Cost },
   ],
   /** Level at which a touching Beam feeds plain rocks straight into the queue. */
   autoIntakeLevel: 2,

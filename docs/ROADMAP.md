@@ -7,6 +7,7 @@ Goal (2 weeks): core loop, polished, playable on iPhone 12 / Chrome via GitHub P
 - Day 1 fix: canvas now renders at device pixel ratio (capped at 3), so text and shapes are sharp on retina phones.
 - Day 2-3: core loop playable. Tap the beam (or Fire) -> 4 s countdown ring -> asteroid enters the 3-slot Bay -> crusher auto-loads it -> tap the rock (hit the glowing weak point for a 3x crit), heat meter with overheat lockout, geodes (8%) with jackpot and Core Shard pity, Ore, Sell button, goal chip (Tap the beam / Crush the rock / Sell your Ore / Expand hull), Foreman bubble, hit chips and floating text. Pure logic in `src/core/loop.ts` (seeded RNG, 30 tests), save v2 with a v1 migration. Debug (`?debug`): +grant, +60s, geodes ON, reset.
 - Day 4 (playtest 1 changes): rocks take ~1.75x longer (dust rock 14 HP / 4 Ore). **Hold to crush**: hold a finger on the rock (0.18 s delay) for 4 auto-hits/s at +4 heat each; tapping is +3 heat; weak-point hit (tap, second finger, or dragging the held finger over it) is 3x damage and -6 heat; overheat at 100 jams for 2 s (frost ring), then resets to 40. Radial heat arc around the rock. **Rock Smasher** replaces the Crusher tile: starts Rusty, repair it, then **Send** a rock (geodes stay in hand) to its queue; it smashes at 0.9 HP/s (L1, queue 2), progress ring + queue pips on the tile, tap the tile for the repair/upgrade sheet (4 levels, auto-intake from L2). Sell keeps back the Ore needed for the next goal (after the first sell). Save v3 with v1/v2 migrations. 52 tests. `?debug` scene hook `debugAdvance(sec)` for scripted runs.
+- Patch 4.1 (playtest 2 tuning, no new features): hold rate 4 -> 8 taps/s (1 dmg, heat +4 per tick, so a pure hold jams in ~3 s unless you hit weak points); dust rock HP 14 -> 35 (x2.5) so tapping and holding take longer; Smasher HP/s scaled x2.5 (2.25 / 2.875 / 3.75 / 4.75) so it still needs ~15.6 s per rock at L1; beam countdown 4 s -> 1 s; the beam (Fire button and tile) is locked while a rock is in the crush stage ("Rock in stage"). 55 tests.
 
 ## Next (Day 5: second beam, Smelter, Hand Tools)
 1. Second Tractor Beam (60 credits + 10 Ore) and beam upgrades; auto-intake retune with two beams.
@@ -16,6 +17,8 @@ Goal (2 weeks): core loop, polished, playable on iPhone 12 / Chrome via GitHub P
 5. Day 6: offline catch-up tiers (0-2 h 30%, 2-8 h 10%, cap 8 h) + welcome-back, upgrade UI polish, playtest build.
 
 ## Known issues
+- Patch 4.1 changed the hand-crack time a lot (about 2.5x longer taps) and the beam is much faster; the econ sim has not been re-run, expect hour-one pacing to shift (Smasher is now the main way to keep up). Re-tune in the Day 5 sim port.
+- With one beam and the beam locked during a rock, the Bay stays empty, so Smasher auto-intake (L2) does nothing until the second beam arrives (Day 5).
 - Build tab, Smelter and placement are visual stubs; the Open tile is a placeholder. The Smasher sits at a fixed cell (2,1), adjacency for auto-intake is assumed.
 - Interim: Smasher repair costs 24 Ore (design is 8 Plate once the Smelter exists). Saves with 10+ rocks migrate as already repaired; use `?debug` [reset] to see the Rusty start.
 - A finger held on the centre of the rock often lands the weak-point crit (-6 heat), so heat rarely jams; watch in playtest.

@@ -8,7 +8,7 @@ import { BAL } from '../src/data/balance';
 import { SMASHER } from '../src/data/smasher';
 
 const dust = (hp: number = BAL.rock.dust.hp): Rock => ({ kind: 'dust', geode: false, hp, maxHp: BAL.rock.dust.hp, ore: BAL.rock.dust.ore });
-const geode = (): Rock => ({ kind: 'dust', geode: true, hp: 21, maxHp: 21, ore: 4 });
+const geode = (): Rock => ({ kind: 'dust', geode: true, hp: 52, maxHp: 52, ore: 4 });
 
 function base(over: Partial<GameState> = {}): GameState {
   const s = createInitialState();
@@ -26,9 +26,12 @@ const run = (s: GameState, secs: number, step = 0.05): GameState => {
 };
 
 describe('rebalanced numbers', () => {
-  it('a dust rock takes 14 HP; a casual 1.6 taps/s tapper needs ~9 s without weak points', () => {
-    expect(BAL.rock.dust.hp).toBe(14);
-    expect(BAL.rock.dust.hp / (1.6 * BAL.tapDmg)).toBeGreaterThan(8);
+  it('a dust rock takes 35 HP; a casual 1.6 taps/s tapper needs ~22 s without weak points', () => {
+    expect(BAL.rock.dust.hp).toBe(35);
+    expect(BAL.rock.dust.hp / (1.6 * BAL.tapDmg)).toBeGreaterThan(20);
+  });
+  it('the Smasher still needs ~15.6 s per dust rock at L1 (HP/s scaled with rock HP)', () => {
+    expect(BAL.rock.dust.hp / SMASHER.levels[0].hpPerSec).toBeCloseTo(15.6, 1);
   });
 });
 
@@ -154,17 +157,18 @@ describe('hold-to-crush and heat', () => {
     }
     return cur;
   };
-  it('does nothing until the hold delay passes, then auto-taps 4 per second at 1 dmg', () => {
+  it('does nothing until the hold delay passes, then auto-taps 8 per second at 1 dmg', () => {
     const s = base();
     const early = holdFor(s, BAL.hold.delay - 0.05);
-    expect(early.crusher.rock!.hp).toBe(14);
+    expect(early.crusher.rock!.hp).toBe(BAL.rock.dust.hp);
     const later = holdFor(s, BAL.hold.delay + 1);
-    expect(later.stats.holdTicks).toBeGreaterThanOrEqual(3);
-    expect(later.stats.holdTicks).toBeLessThanOrEqual(5);
+    expect(later.stats.holdTicks).toBeGreaterThanOrEqual(7);
+    expect(later.stats.holdTicks).toBeLessThanOrEqual(9);
     expect(later.flags.usedHold).toBe(true);
   });
-  it('a held rock of 14 HP is cracked in about 3.5 s of holding, paying Ore', () => {
-    const s = holdFor(base(), 4.2);
+  it('a held rock of 35 HP is cracked in about 4.4 s of holding (heat permitting), paying Ore', () => {
+    // start cool and give it extra time; a pure holder may jam once on the way
+    const s = holdFor(base(), 9);
     expect(s.stats.rocks).toBe(1);
     expect(s.items.ore).toBe(BAL.rock.dust.ore);
   });
@@ -190,16 +194,19 @@ describe('hold-to-crush and heat', () => {
   it('dragging the held finger over the visible weak point crits (once per appearance)', () => {
     let s = base({ crusher: { ...createInitialState().crusher, rock: dust(999), weakT: 0, weakX: 0.3, weakY: 0.1 } });
     s = { ...s, crusher: { ...s.crusher, holdT: BAL.hold.delay } };
-    const r = holdCrush(s, 0.26, 0.3, 0.1); // exactly one tick on the weak point
+    const r = holdCrush(s, 0.13, 0.3, 0.1); // exactly one tick on the weak point
     expect(r.events.filter((e) => e.kind === 'hit' && e.crit)).toHaveLength(1);
     expect(r.state.crusher.rock!.hp).toBe(999 - BAL.weak.dmg);
-    const again = holdCrush(r.state, 0.26, 0.3, 0.1);
+    const again = holdCrush(r.state, 0.13, 0.3, 0.1);
     expect(again.events.filter((e) => e.kind === 'hit' && e.crit)).toHaveLength(0);
   });
-  it('heat per rock for a pure holder stays under one overheat (about 56)', () => {
-    const perRock = (14 / BAL.hold.dmg) * BAL.heat.perHoldTick;
-    expect(perRock).toBeLessThan(BAL.heat.max);
-    expect(perRock).toBeGreaterThan(40);
+  it('heat per rock for a pure holder (no weak-point hits) exceeds one overheat, so aiming matters', () => {
+    const perRock = (BAL.rock.dust.hp / BAL.hold.dmg) * BAL.heat.perHoldTick;
+    expect(perRock).toBeGreaterThan(BAL.heat.max);
+    // sustained hold heats at rate x perHoldTick per second, jamming in about 3 s
+    const secsToJam = BAL.heat.max / (BAL.hold.rate * BAL.heat.perHoldTick);
+    expect(secsToJam).toBeGreaterThan(2);
+    expect(secsToJam).toBeLessThan(4);
   });
   it('releaseHold is a no-op when nothing is held', () => {
     const s = base();

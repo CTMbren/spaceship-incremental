@@ -44,6 +44,7 @@ export function tapBeam(state: GameState, index = 0): Outcome {
   const s = clone(state);
   const beam = s.beams[index];
   if (!beam || beam.status !== 'idle') return { state, events: [] };
+  if (s.crusher.rock) return { state, events: [] }; // beam is locked while a rock is in the crush stage
   beam.status = 'counting';
   beam.remaining = BAL.beamCountdown;
   s.flags.tappedBeam = true;

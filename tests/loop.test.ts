@@ -44,13 +44,25 @@ describe('beam and Bay', () => {
   it('blocks when the Bay is full and delivers once a slot frees', () => {
     let s = createInitialState();
     const rock = { kind: 'dust' as const, geode: false, hp: 99, maxHp: 99, ore: 3 };
-    s = { ...s, bay: [rock, rock, rock], crusher: { ...s.crusher, rock } };
-    s = run(tapBeam(s).state, BAL.beamCountdown + 0.5);
+    // beam already counting (fired before the stage filled); Bay full and stage busy
+    s = { ...s, bay: [rock, rock, rock], crusher: { ...s.crusher, rock }, beams: [{ status: 'counting', remaining: BAL.beamCountdown }] };
+    s = run(s, BAL.beamCountdown + 0.5);
     expect(s.beams[0].status).toBe('blocked');
     expect(s.bay).toHaveLength(3);
     s = { ...s, crusher: { ...s.crusher, rock: null } }; // crusher takes a rock, freeing a slot
     s = run(s, 0.2);
     expect(s.beams[0].status).toBe('idle');
+  });
+  it('the beam countdown is 1 second', () => {
+    expect(BAL.beamCountdown).toBe(1);
+  });
+  it('the beam cannot be fired while a rock is in the crush stage', () => {
+    const s = createInitialState();
+    const busy = { ...s, crusher: { ...s.crusher, rock: { kind: 'dust' as const, geode: false, hp: 5, maxHp: 35, ore: 4 } } };
+    const r = tapBeam(busy);
+    expect(r.state).toBe(busy);
+    expect(r.state.beams[0].status).toBe('idle');
+    expect(r.state.flags.tappedBeam).toBe(false);
   });
   it('a huge dt does not break anything', () => {
     const s = tick(tapBeam(createInitialState()).state, 3600).state;
@@ -90,7 +102,7 @@ describe('crusher', () => {
   });
   it('crushing a dust rock yields Ore and counts it', () => {
     let s = withRock();
-    for (let i = 0; i < 40 && s.crusher.rock; i++) s = tapCrush(s, -0.9, 0.9).state;
+    for (let i = 0; i < 80 && s.crusher.rock; i++) s = run(tapCrush(s, -0.9, 0.9).state, 0.6); // tap at a relaxed pace so heat cools
     expect(s.crusher.rock).toBeNull();
     expect(s.items.ore).toBe(BAL.rock.dust.ore);
     expect(s.stats.rocks).toBe(1);
@@ -114,13 +126,13 @@ describe('crusher', () => {
   it('a geode pays a jackpot; every 12th geode guarantees a Core Shard', () => {
     let s = withRock(true);
     expect(s.crusher.rock!.geode).toBe(true);
-    for (let i = 0; i < 60 && s.crusher.rock; i++) s = tapCrush(s, -0.9, 0.9).state;
+    for (let i = 0; i < 120 && s.crusher.rock; i++) s = run(tapCrush(s, -0.9, 0.9).state, 0.6);
     expect(s.stats.geodes).toBe(1);
     expect(s.credits).toBe(BAL.startCredits + BAL.rock.dust.ore * BAL.geode.jackpotOreMul);
     // pity
     let p = withRock(true);
     p = { ...p, pity: BAL.geode.pity - 1 };
-    for (let i = 0; i < 60 && p.crusher.rock; i++) p = tapCrush(p, -0.9, 0.9).state;
+    for (let i = 0; i < 120 && p.crusher.rock; i++) p = run(tapCrush(p, -0.9, 0.9).state, 0.6);
     expect(p.items.core_shard).toBe(1);
     expect(p.pity).toBe(0);
   });
