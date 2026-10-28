@@ -99,10 +99,11 @@ describe('selling: switch, rows, selected', () => {
       expect(sellSelected(off, items).state.credits - off.credits).toBe(sellValue(off, items));
     }
   });
-  it('sellMode is quick until the first Plate, then cargo', () => {
+  it('sellMode is quick until the Smelter is built (or Plate exists), then cargo', () => {
     const s = createInitialState();
     expect(sellMode(s)).toBe('quick');
     expect(sellMode({ ...s, items: { ...s.items, ore: 50 } })).toBe('quick');
+    expect(sellMode({ ...s, smelter: { ...s.smelter, built: true } })).toBe('cargo');
     expect(sellMode({ ...s, stats: { ...s.stats, smelted: 1 } })).toBe('cargo');
     expect(sellMode({ ...s, items: { ...s.items, plate: 1 } })).toBe('cargo');
   });
@@ -187,5 +188,20 @@ describe('menu help and wording', () => {
       ship: { ...base.ship, modules: [...base.ship.modules, { uid: 3, defId: 'smelter' as const, cell: '2,2' }] } };
     expect(currentGoal(s)?.id).toBe('send');
     expect(currentGoal(s)?.text).toMatch(/Smash/);
+  });
+});
+
+describe('goal chip after the tutorial', () => {
+  it('points at an Open outside tile before suggesting more hull', async () => {
+    const { chipText } = await import('../src/core/goals');
+    const b = createInitialState();
+    const s: GameState = {
+      ...b, flags: { ...b.flags, tappedBeam: true }, stats: { ...b.stats, rocks: 1, sold: 1, sent: 1 },
+      smelter: { ...b.smelter, built: true }, smasher: { ...b.smasher, repaired: true },
+      beams: [{ status: 'idle', remaining: 0, level: 1 }, { status: 'idle', remaining: 0, level: 1 }],
+      ship: { ...b.ship, ownedCells: [...b.ship.ownedCells, '1,1'], modules: [...b.ship.modules, { uid: 3, defId: 'smelter' as const, cell: '2,2' }] },
+    };
+    expect(chipText(s)).toMatch(/Open tile/);
+    expect(chipText(s)).not.toMatch(/Expand/);
   });
 });

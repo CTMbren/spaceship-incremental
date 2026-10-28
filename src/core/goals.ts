@@ -2,6 +2,7 @@ import { SMASHER } from '../data/smasher';
 import { MODULES } from '../data/modules';
 import { HULLS } from '../data/hulls';
 import { nextTileCost } from './hull';
+import { freeCells, freeEdgeCells, moduleCost } from './modules';
 import { structureGoal } from './reserve';
 import type { Cost, GameState } from './types';
 
@@ -38,7 +39,22 @@ export function currentGoal(s: GameState): Goal | null {
     if (sg?.id === 'beam2') return { id: 'beam2', text: `Add a second beam · ${costText(sg.cost)}` };
     const def = HULLS[s.ship.hullId];
     const tile = def ? nextTileCost(def, s.ship.ownedCells.length) : null;
-    return tile ? { id: 'expand', text: `Expand hull · ${costText(tile)}` } : null;
+    const hint = freeCells(s).length > 0 ? ' · a beam needs an outside tile' : '';
+    return tile ? { id: 'expand', text: `Expand hull · ${costText(tile)}${hint}` } : null;
   }
   return null;
+}
+
+/**
+ * Chip text for the HUD. While the tutorial goal is running it is that goal; afterwards it points at an
+ * Open tile first (a beam on an outside tile) and only suggests more hull once the Open tiles are used up.
+ */
+export function chipText(s: GameState): string {
+  const goal = currentGoal(s);
+  if (goal) return `Next: ${goal.text}`;
+  const beam = moduleCost(s, 'beam');
+  if (beam && freeEdgeCells(s).length > 0) return `Next: Add a beam on an Open tile · ${costText(beam)}`;
+  const tile = nextTileCost(HULLS[s.ship.hullId], s.ship.ownedCells.length);
+  if (tile) return `Next: Expand hull · ${costText(tile)}${freeCells(s).length > 0 ? ' · Open tiles are not outside tiles' : ''}`;
+  return 'Hull complete';
 }

@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { buyTile, canAfford } from '../core/actions';
-import { costText, currentGoal } from '../core/goals';
+import { chipText as hudChipText, costText, currentGoal } from '../core/goals';
 import { cellKey, nextTileCost, parseKey, unlockableCells } from '../core/hull';
 import {
   bayRoom, canSend, handStats, holdCrush, nextBeamUpgrade, nextHandUpgrade, nextSmasherUpgrade, nextSmelterUpgrade,
@@ -474,12 +474,8 @@ export class ShipScene extends Phaser.Scene {
       this.hud.add([o, pl]);
     }
 
-    const def = HULLS[st.ship.hullId];
-    const next = nextTileCost(def, st.ship.ownedCells.length);
     const goal = currentGoal(st);
-    const chipText = goal
-      ? `Next: ${goal.text}`
-      : next ? `Next: Expand hull · ${costText(next)}` : 'Hull complete';
+    const chipText = hudChipText(st);
     const chip = this.add.graphics();
     chip.fillStyle(C.panel, 1).fillRoundedRect(16, 66, 306, 44, 22);
     chip.lineStyle(3, goal ? C.crit : C.panelEdge, 1).strokeRoundedRect(16, 66, 306, 44, 22);

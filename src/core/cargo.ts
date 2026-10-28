@@ -3,12 +3,12 @@ import { SMELTER } from '../data/modules';
 import { availableQty, reservedQty, SELLABLE, smeltFeedReserve, structureGoal, type StructureGoalId } from './reserve';
 import type { GameState, ItemId } from './types';
 
-/** `quick`: one tap sells everything (only Ore so far). `cargo`: the Sell button opens the Cargo sheet. */
+/** `quick`: one tap sells everything (only Ore so far, before the Smelter). `cargo`: the Sell button opens the Cargo sheet. */
 export type SellMode = 'quick' | 'cargo';
 
-/** The Cargo sheet takes over once the player has a second thing to sell (the first Plate). */
+/** The Cargo sheet takes over once a second thing to sell is coming: the Smelter is built, or Plate already exists. */
 export const sellMode = (s: GameState): SellMode =>
-  s.stats.smelted > 0 || SELLABLE.some((k) => k !== 'ore' && s.items[k] > 0) ? 'cargo' : 'quick';
+  s.smelter.built || s.stats.smelted > 0 || SELLABLE.some((k) => k !== 'ore' && s.items[k] > 0) ? 'cargo' : 'quick';
 
 const GOAL_LABEL: Record<StructureGoalId, string> = {
   smelter: 'the Smelter',
