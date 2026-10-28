@@ -9,12 +9,22 @@ export function serialize(state: GameState): string {
 
 type Loose = Partial<GameState> & { version: number };
 
-/** Returns a fresh state if the data is missing, corrupt, or from an unknown future version. */
-export function deserialize(raw: string | null): GameState {
-  if (!raw) return createInitialState();
+/** Is this parsed JSON plausibly a save of ours? (Used by Paste save, so a stray text cannot wipe a game.) */
+function looksLikeSave(data: unknown): data is Loose {
+  const d = data as Loose | null;
+  return (
+    !!d && typeof d === 'object' && typeof d.version === 'number' && d.version >= 1 &&
+    typeof d.credits === 'number' && !!d.items && typeof d.items === 'object' &&
+    !!d.ship && Array.isArray(d.ship.ownedCells)
+  );
+}
+
+/** Parses and migrates save text. `ok: false` for corrupt text, not-a-save, or a save from a newer version. */
+export function parseSave(raw: string | null): { ok: true; state: GameState } | { ok: false } {
+  if (!raw) return { ok: false };
   try {
-    const data = JSON.parse(raw) as Loose;
-    if (typeof data?.version !== 'number' || data.version > SAVE_VERSION) return createInitialState();
+    const data: unknown = JSON.parse(raw);
+    if (!looksLikeSave(data) || data.version > SAVE_VERSION) return { ok: false };
     // Migrations (each step upgrades one version; all are idempotent).
     let cur: Loose = data;
     if (cur.version < 2) {
@@ -62,11 +72,21 @@ export function deserialize(raw: string | null): GameState {
       // v4 -> v5: savedAt for offline catch-up. 0 means "unknown", so an old save earns no offline time.
       cur = { ...cur, savedAt: cur.savedAt ?? 0, version: 5 };
     }
-    data.version = cur.version;
-    return { ...createInitialState(), ...cur } as GameState;
+    if (cur.version < 6) {
+      // v5 -> v6: the Cargo sheet's "hold materials for my goal" switch (on, as before).
+      const fresh = createInitialState();
+      cur = { ...cur, flags: { ...fresh.flags, ...(cur.flags ?? {}), holdForGoal: cur.flags?.holdForGoal ?? true }, version: 6 };
+    }
+    return { ok: true, state: { ...createInitialState(), ...cur } as GameState };
   } catch {
-    return createInitialState();
+    return { ok: false };
   }
+}
+
+/** Returns a fresh state if the data is missing, corrupt, or from an unknown future version. */
+export function deserialize(raw: string | null): GameState {
+  const r = parseSave(raw);
+  return r.ok ? r.state : createInitialState();
 }
 
 export function saveToStorage(state: GameState): void {

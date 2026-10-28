@@ -93,9 +93,8 @@ function spend(s0: GameState): GameState {
 
 function look(s0: GameState, policy: Policy, dt: number): GameState {
   let s = s0;
-  const c = s.crusher;
   // fire beams whenever they are idle and the stage is free
-  if (!c.rock) s = tapAllBeams(s).state;
+  s = tapAllBeams(s).state; // the Bay's room limits it
   const rock = s.crusher.rock;
   if (!rock) return s;
   const hand = handStats(s);

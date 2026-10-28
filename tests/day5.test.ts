@@ -169,14 +169,14 @@ describe('Tractor Beam levels and Fire all', () => {
     expect(upgradeBeam(s, 0)).toEqual({ ok: false, reason: 'max_level' });
     expect(upgradeBeam(s, 5)).toEqual({ ok: false, reason: 'max_level' });
   });
-  it('Fire all starts every idle beam, and is locked while a rock is in the stage', () => {
+  it('Fire all starts every idle beam, and no longer needs an empty stage', () => {
     let s = createInitialState();
     s = { ...s, beams: [...s.beams, { status: 'idle', remaining: 0, level: 1 }] };
     const fired = tapAllBeams(s).state;
     expect(fired.beams.map((b) => b.status)).toEqual(['counting', 'counting']);
     expect(fired.flags.tappedBeam).toBe(true);
     const busy = { ...s, crusher: { ...s.crusher, rock: rock() } };
-    expect(tapAllBeams(busy).state).toBe(busy);
+    expect(tapAllBeams(busy).state.beams.map((b) => b.status)).toEqual(['counting', 'counting']);
   });
   it('two beams fire together: one rock for the stage and one waiting in the Bay', () => {
     let s = createInitialState();
@@ -278,7 +278,7 @@ describe('selling and reserved materials', () => {
   });
 });
 
-describe('save v3 -> v5', () => {
+describe('save v3 -> v6', () => {
   it('adds modules, smelter, hand level, beam levels and keeps progress; idempotent', () => {
     const v3 = createInitialState() as unknown as Record<string, unknown>;
     const old = {
@@ -289,7 +289,7 @@ describe('save v3 -> v5', () => {
       smasher: { repaired: true, level: 2, queue: [] },
     };
     const s = deserialize(JSON.stringify(old));
-    expect(s.version).toBe(5);
+    expect(s.version).toBe(6);
     expect(s.credits).toBe(777);
     expect(s.ship.modules.map((m) => m.defId)).toEqual(['beam', 'smasher']);
     expect(s.ship.ownedCells).toHaveLength(4);

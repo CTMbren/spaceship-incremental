@@ -44,26 +44,34 @@ export const smasherQueueCap = (s: GameState): number => SMASHER.levels[s.smashe
 
 // ---- beam ------------------------------------------------------------------
 
-/** Player taps a beam. Starts its countdown if it is idle. */
+/**
+ * Free Bay slots, counting rocks already on their way (a beam counting down or waiting to deliver), so
+ * the player can never fire more rocks than the Bay can hold. Fire stays available until this is 0.
+ */
+export const bayRoom = (s: GameState): number =>
+  Math.max(0, BAL.baySlots - s.bay.length - s.beams.filter((b) => b.status !== 'idle').length);
+
+/** Player taps a beam. Starts its countdown if it is idle and there is room in the Bay. */
 export function tapBeam(state: GameState, index = 0): Outcome {
+  const beam = state.beams[index];
+  if (!beam || beam.status !== 'idle' || bayRoom(state) <= 0) return { state, events: [] };
   const s = clone(state);
-  const beam = s.beams[index];
-  if (!beam || beam.status !== 'idle') return { state, events: [] };
-  if (s.crusher.rock) return { state, events: [] }; // beam is locked while a rock is in the crush stage
-  beam.status = 'counting';
-  beam.remaining = BAL.beamCountdown;
+  s.beams[index].status = 'counting';
+  s.beams[index].remaining = BAL.beamCountdown;
   s.flags.tappedBeam = true;
   return { state: s, events: [] };
 }
 
-/** The Fire button: start every idle beam at once (still locked while a rock is in the crush stage). */
+/** The Fire button: start idle beams, as many as there is room in the Bay for (first beams first). */
 export function tapAllBeams(state: GameState): Outcome {
-  if (state.crusher.rock || !state.beams.some((b) => b.status === 'idle')) return { state, events: [] };
+  let room = bayRoom(state);
+  if (room <= 0 || !state.beams.some((b) => b.status === 'idle')) return { state, events: [] };
   const s = clone(state);
   for (const b of s.beams) {
-    if (b.status === 'idle') {
+    if (room > 0 && b.status === 'idle') {
       b.status = 'counting';
       b.remaining = BAL.beamCountdown;
+      room -= 1;
     }
   }
   s.flags.tappedBeam = true;
@@ -96,12 +104,12 @@ export function tick(state: GameState, dt: number, forceGeode?: boolean): Outcom
         sm.queue.push(rock);
         beam.status = 'idle';
         beam.remaining = 0;
-        events.push({ kind: 'rock_arrived', geode: false });
+        events.push({ kind: 'rock_arrived', geode: false, to: 'smasher' });
       } else if (s.bay.length < BAL.baySlots) {
         s.bay.push(rock);
         beam.status = 'idle';
         beam.remaining = 0;
-        events.push({ kind: 'rock_arrived', geode: rock.geode });
+        events.push({ kind: 'rock_arrived', geode: rock.geode, to: 'bay' });
       } else {
         // Bay full: the rock waits at the beam. Undo the RNG draw side effects are harmless (seeded).
         s.rng = state.rng;
@@ -287,11 +295,11 @@ export type SendCheck =
   | { ok: true }
   | { ok: false; reason: 'rusty' | 'no_rock' | 'geode' | 'full'; label: string };
 
-/** What the Send button should do and say right now. */
+/** What the Smash button should do and say right now. */
 export function canSend(s: GameState): SendCheck {
   if (!s.smasher.repaired) return { ok: false, reason: 'rusty', label: 'Smasher is rusty' };
   const rock = s.crusher.rock;
-  if (!rock) return { ok: false, reason: 'no_rock', label: 'No rock to send' };
+  if (!rock) return { ok: false, reason: 'no_rock', label: 'No rock to smash' };
   if (rock.geode) return { ok: false, reason: 'geode', label: 'Crack this one yourself' };
   const cap = smasherQueueCap(s);
   if (s.smasher.queue.length >= cap) {
@@ -361,11 +369,12 @@ export function sell(state: GameState, item: ItemId, qty?: number): Outcome {
   return { state: s, events: [{ kind: 'sold', item, qty: n, credits }] };
 }
 
-/** The Sell button: sell everything sellable except what the current goal needs. */
-export function sellAll(state: GameState): Outcome {
+/** Sell the surplus (everything not held back for the goal) of the given items. Shards are never sold. */
+export function sellSelected(state: GameState, items: readonly ItemId[]): Outcome {
   const s = clone(state);
   const events: GameEvent[] = [];
   for (const item of SELLABLE) {
+    if (!items.includes(item)) continue;
     const n = availableQty(state, item);
     if (n <= 0) continue;
     const credits = n * PRICES[item];
@@ -375,6 +384,20 @@ export function sellAll(state: GameState): Outcome {
     events.push({ kind: 'sold', item, qty: n, credits });
   }
   return events.length ? { state: s, events } : { state, events: [] };
+}
+
+/** The quick Sell button: sell everything sellable except what the current goal needs. */
+export const sellAll = (state: GameState): Outcome => sellSelected(state, SELLABLE);
+
+/** One Cargo row's Sell button. */
+export const sellSurplus = (state: GameState, item: ItemId): Outcome => sellSelected(state, [item]);
+
+/** The Cargo sheet switch: keep back what the current goal needs (on) or let the player sell it (off). */
+export function setHoldForGoal(state: GameState, on: boolean): Outcome {
+  if (state.flags.holdForGoal === on) return { state, events: [] };
+  const s = clone(state);
+  s.flags.holdForGoal = on;
+  return { state: s, events: [] };
 }
 
 // ---- upgrades (credits buy speed) ----------------------------------------------------

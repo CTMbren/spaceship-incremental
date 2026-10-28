@@ -37,9 +37,9 @@ describe('beam and Bay', () => {
     expect(s.crusher.rock).not.toBeNull(); // auto-loaded from the Bay
   });
   it('ignores a second tap while counting', () => {
-    const a = tapBeam(createInitialState()).state;
-    const b = tapBeam(run(a, 1)).state;
-    expect(b.beams[0].remaining).toBeCloseTo(BAL.beamCountdown - 1, 1);
+    const a = run(tapBeam(createInitialState()).state, 0.5);
+    const b = tapBeam(a).state;
+    expect(b.beams[0].remaining).toBeCloseTo(BAL.beamCountdown - 0.5, 1); // the countdown was not restarted
   });
   it('blocks when the Bay is full and delivers once a slot frees', () => {
     let s = createInitialState();
@@ -56,13 +56,14 @@ describe('beam and Bay', () => {
   it('the beam countdown is 1 second', () => {
     expect(BAL.beamCountdown).toBe(1);
   });
-  it('the beam cannot be fired while a rock is in the crush stage', () => {
+  it('the beam CAN be fired while a rock is in the crush stage (it stocks the Bay)', () => {
     const s = createInitialState();
     const busy = { ...s, crusher: { ...s.crusher, rock: { kind: 'dust' as const, geode: false, hp: 5, maxHp: 35, ore: 4 } } };
     const r = tapBeam(busy);
-    expect(r.state).toBe(busy);
-    expect(r.state.beams[0].status).toBe('idle');
-    expect(r.state.flags.tappedBeam).toBe(false);
+    expect(r.state.beams[0].status).toBe('counting');
+    expect(r.state.flags.tappedBeam).toBe(true);
+    const later = run(r.state, BAL.beamCountdown + 0.2);
+    expect(later.bay).toHaveLength(1);
   });
   it('a huge dt does not break anything', () => {
     const s = tick(tapBeam(createInitialState()).state, 3600).state;
@@ -189,13 +190,13 @@ describe('sell and goals', () => {
 });
 
 describe('save migration', () => {
-  it('upgrades a v1 save through to v5 and keeps credits, items and hull', () => {
+  it('upgrades a v1 save through to v6 and keeps credits, items and hull', () => {
     const v1 = JSON.stringify({
       version: 1, credits: 321, items: { ore: 5 },
       ship: { hullId: 'tug', ownedCells: ['2,0', '2,1', '2,2', '1,2'] },
     });
     const s = deserialize(v1);
-    expect(s.version).toBe(5);
+    expect(s.version).toBe(6);
     expect(s.credits).toBe(321);
     expect(s.items.ore).toBe(5);
     expect(s.items.ice).toBe(0);

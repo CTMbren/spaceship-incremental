@@ -3,20 +3,23 @@ import { buyTile, canAfford } from '../core/actions';
 import { costText, currentGoal } from '../core/goals';
 import { cellKey, nextTileCost, parseKey, unlockableCells } from '../core/hull';
 import {
-  canSend, handStats, holdCrush, nextBeamUpgrade, nextHandUpgrade, nextSmasherUpgrade, nextSmelterUpgrade,
-  releaseHold, repairSmasher, sellAll, sendToSmasher, smasherQueueCap, tapAllBeams, tapBeam, tapCrush, tick,
+  bayRoom, canSend, handStats, holdCrush, nextBeamUpgrade, nextHandUpgrade, nextSmasherUpgrade, nextSmelterUpgrade,
+  releaseHold, repairSmasher, sellAll, sellSelected, sellSurplus, sendToSmasher, setHoldForGoal, smasherQueueCap, tapAllBeams, tapBeam, tapCrush, tick,
   toggleSmelter, upgradeBeam, upgradeHand, upgradeSmasher, upgradeSmelter, weakActive,
 } from '../core/loop';
 import { freeCells, freeEdgeCells, isEdgeCell, moduleCost, placeModule } from '../core/modules';
 import { applyOffline, stamp, type OfflineReport } from '../core/offline';
+import { cargoRows, sellMode } from '../core/cargo';
+import { fmtNum, formatVersion } from '../core/format';
 import { SELLABLE, sellValue } from '../core/reserve';
 import { readyUpgrades } from '../core/upgrades';
-import { loadFromStorage, saveToStorage } from '../core/save';
+import { loadFromStorage, parseSave, saveToStorage, serialize } from '../core/save';
 import { createInitialState } from '../core/state';
-import type { Cell, Cost, GameEvent, GameState, ModuleId } from '../core/types';
+import type { Cell, Cost, GameEvent, GameState, ItemId, ModuleId } from '../core/types';
 import { BAL } from '../data/balance';
 import { BEAM, MODULES, SMELTER } from '../data/modules';
 import { HAND } from '../data/hand';
+import { HELP } from '../data/help';
 import { SMASHER } from '../data/smasher';
 import { HULLS } from '../data/hulls';
 import { drawHullExterior } from './hullArt';
@@ -35,13 +38,35 @@ const PAN_SPEED = 420; // px per second while an arrow is held
 const MAX_GHOSTS = 4;
 const STAGE = { x: 16, y: 466, w: 358, h: 184, cx: 195, cy: 556, r: 60 };
 const STRIP_Y = 660;
+/** The Bay: three slots at the right of the status strip. */
+const BAY = { x: 244, y: STRIP_Y + 3, size: 34, gap: 8 };
 const ACTION = { y: 706, h: 46 };
 
 const SMELTER_COLOR = 0xb4552f;
 
+const ITEM_LOOK: Record<ItemId, { name: string; color: number }> = {
+  ore: { name: 'Ore', color: 0xa9937c },
+  ice: { name: 'Ice', color: 0x9fd8ff },
+  plate: { name: 'Plate', color: 0x9fb4d6 },
+  coolant: { name: 'Coolant', color: 0x4da3ff },
+  circuit: { name: 'Circuit', color: 0x6fd08c },
+  core_shard: { name: 'Core Shard', color: 0x8a5ce0 },
+};
+const HOLD_RESET_MS = 1500;
+
+interface SheetFooter { label: string; can: boolean; fn: () => void }
+interface SheetSpec { title: string; rows: SheetRow[]; footer?: SheetFooter }
+
 type SheetRow =
   | { t: 'text'; text: string; color?: string }
+  | { t: 'heading'; text: string }
   | { t: 'button'; label: string; fn: () => void }
+  | { t: 'switch'; title: string; sub: string; on: boolean; fn: () => void }
+  | { t: 'hold'; label: string; fn: () => void }
+  | {
+      t: 'cargo'; item: ItemId; count: number; price: number; note: string; sellLabel: string; canSell: boolean;
+      forSale: boolean; ticked: boolean; onTick: () => void; onSell: () => void;
+    }
   | { t: 'card'; title: string; sub: string; verb: string; cost: string; can: boolean; fn: () => void };
 
 export class ShipScene extends Phaser.Scene {
@@ -60,7 +85,8 @@ export class ShipScene extends Phaser.Scene {
   private arrowZones: Partial<Record<'left' | 'right' | 'up' | 'down', Phaser.GameObjects.Zone>> = {};
   private tx!: Record<'stage' | 'fire' | 'sell' | 'heat' | 'bay' | 'hp' | 'send' | 'smash', Phaser.GameObjects.Text>;
   private shipLabels: Phaser.GameObjects.Text[] = []; // pooled tile labels inside the zoomed ship (beams 0-2, Smelter 3)
-  private sheetBuild?: () => { title: string; rows: SheetRow[] };
+  private sheetBuild?: () => SheetSpec;
+  private cargoOff = new Set<ItemId>(); // rows the player un-ticked in the Cargo sheet
   private sheetKind = '';
   private sheetScroll = 0;
   private holdPointer: Phaser.Input.Pointer | null = null;
@@ -455,12 +481,24 @@ export class ShipScene extends Phaser.Scene {
       ? `Next: ${goal.text}`
       : next ? `Next: Expand hull · ${costText(next)}` : 'Hull complete';
     const chip = this.add.graphics();
-    chip.fillStyle(C.panel, 1).fillRoundedRect(16, 66, 358, 44, 22);
-    chip.lineStyle(3, goal ? C.crit : C.panelEdge, 1).strokeRoundedRect(16, 66, 358, 44, 22);
-    const chipLabel = this.txt(W / 2, 88, chipText, {
-      fontFamily: FONT, fontSize: '15px', color: T.text, fixedWidth: 330, align: 'center',
+    chip.fillStyle(C.panel, 1).fillRoundedRect(16, 66, 306, 44, 22);
+    chip.lineStyle(3, goal ? C.crit : C.panelEdge, 1).strokeRoundedRect(16, 66, 306, 44, 22);
+    const chipLabel = this.txt(16 + 153, 88, chipText, {
+      fontFamily: FONT, fontSize: '14px', color: T.text, fixedWidth: 270, align: 'center', wordWrap: { width: 270 },
     }).setOrigin(0.5);
-    this.hud.add([chip, chipLabel]);
+    // gear button: opens the menu
+    const gear = this.add.graphics();
+    const gx = 352, gy = 88;
+    gear.fillStyle(C.panel, 1).fillRoundedRect(gx - 22, gy - 22, 44, 44, 22);
+    gear.lineStyle(3, this.sheetKind === 'menu' ? C.crit : C.panelEdge, 1).strokeRoundedRect(gx - 22, gy - 22, 44, 44, 22);
+    gear.lineStyle(5, 0xaeb9d6, 1);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      gear.lineBetween(gx + Math.cos(a) * 8, gy + Math.sin(a) * 8, gx + Math.cos(a) * 12.5, gy + Math.sin(a) * 12.5);
+    }
+    gear.fillStyle(0xaeb9d6, 1).fillCircle(gx, gy, 9);
+    gear.fillStyle(C.panel, 1).fillCircle(gx, gy, 3.5);
+    this.hud.add([chip, chipLabel, gear]);
 
     if (!st.flags.tappedBeam) {
       const bw = this.cellWorld(this.moduleCell('beam', 0) ?? { x: 2, y: 0 });
@@ -525,7 +563,7 @@ export class ShipScene extends Phaser.Scene {
     this.toast?.destroy();
     const t = this.txt(W / 2, H - 130, msg, {
       fontFamily: FONT, fontSize: '16px', color: T.text, backgroundColor: '#2B3550', padding: { x: 14, y: 8 },
-    }).setOrigin(0.5).setDepth(10);
+    }).setOrigin(0.5).setDepth(40);
     this.toast = t;
     this.tweens.add({ targets: t, alpha: 0, delay: 1400, duration: 300, onComplete: () => t.destroy() });
   }
@@ -604,14 +642,14 @@ export class ShipScene extends Phaser.Scene {
   }
 
   /** Open (or refresh) a sheet. `build` is re-run after every purchase so costs and levels stay current. */
-  private showSheet(kind: string, build: () => { title: string; rows: SheetRow[] }): void {
+  private showSheet(kind: string, build: () => SheetSpec): void {
     this.sheet?.destroy(true);
     const changed = this.sheetKind !== kind;
     if (changed) this.sheetScroll = 0;
     this.sheetKind = kind;
     this.sheetBuild = build;
-    const { title, rows } = build();
-    this.sheet = this.renderSheet(title, rows);
+    const spec = build();
+    this.sheet = this.renderSheet(spec.title, spec.rows, spec.footer);
     if (changed) this.redraw();
   }
 
@@ -619,8 +657,10 @@ export class ShipScene extends Phaser.Scene {
     if (this.sheetBuild) this.showSheet(this.sheetKind, this.sheetBuild);
   }
 
-  private renderSheet(title: string, rows: SheetRow[]): Phaser.GameObjects.Container {
+  private renderSheet(title: string, rows: SheetRow[], footer?: SheetFooter): Phaser.GameObjects.Container {
     const X = 36, WID = 318, BTN_W = 136, TXT_W = WID - BTN_W - 12, HEAD = 58, BOTTOM = H - 92;
+    const FOOT = footer ? 66 : 0;
+    const CG_SELL = 88, CG_TXT = WID - 64 - CG_SELL - 8; // Cargo row: tick box + icon, text, Sell button
     const box = this.add.container(0, 0).setDepth(30);
     const dim = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.55).setInteractive();
     dim.on('pointerdown', () => this.closeSheet());
@@ -631,15 +671,29 @@ export class ShipScene extends Phaser.Scene {
         const a = this.txt(X, 0, row.text, { fontFamily: FONT, fontSize: '15px', color: row.color ?? T.dim, wordWrap: { width: WID } });
         return { row, a, b: undefined as Phaser.GameObjects.Text | undefined, h: a.height + 14 };
       }
-      if (row.t === 'button') return { row, a: undefined, b: undefined, h: 70 };
+      if (row.t === 'button' || row.t === 'hold') return { row, a: undefined, b: undefined, h: 70 };
+      if (row.t === 'heading') {
+        const a = this.txt(X, 0, row.text, { fontFamily: FONT, fontSize: '17px', fontStyle: '600', color: T.text, wordWrap: { width: WID } });
+        return { row, a, b: undefined as Phaser.GameObjects.Text | undefined, h: a.height + 14 };
+      }
+      if (row.t === 'cargo') {
+        const a = this.txt(X + 64, 0, `${ITEM_LOOK[row.item].name}  x${fmtNum(row.count)}`, { fontFamily: FONT, fontSize: '16px', fontStyle: '600', color: T.text, wordWrap: { width: CG_TXT } });
+        const b = this.txt(X + 64, 0, row.note, { fontFamily: FONT, fontSize: '12px', color: T.dim, wordWrap: { width: CG_TXT } });
+        return { row, a, b, h: Math.max(72, a.height + b.height + 24) };
+      }
+      if (row.t === 'switch') {
+        const a = this.txt(X, 0, row.title, { fontFamily: FONT, fontSize: '16px', fontStyle: '600', color: T.text, wordWrap: { width: WID - 80 } });
+        const b = this.txt(X, 0, row.sub, { fontFamily: FONT, fontSize: '12px', color: T.dim, wordWrap: { width: WID - 80 } });
+        return { row, a, b, h: Math.max(64, a.height + b.height + 20) };
+      }
       const a = this.txt(X, 0, row.title, { fontFamily: FONT, fontSize: '17px', fontStyle: '600', color: T.text, wordWrap: { width: TXT_W } });
       const b = this.txt(X, 0, row.sub, { fontFamily: FONT, fontSize: '13px', color: T.dim, wordWrap: { width: TXT_W } });
       return { row, a, b, h: Math.max(68, a.height + b.height + 20) };
     });
     const bodyH = laid.reduce((n, l) => n + l.h, 0);
-    const panelH = Math.min(BOTTOM - 110, HEAD + bodyH + 16);
+    const panelH = Math.min(BOTTOM - 110, HEAD + bodyH + 16 + FOOT);
     const panelY = BOTTOM - panelH;
-    const viewTop = panelY + HEAD - 4, viewBottom = panelY + panelH - 10;
+    const viewTop = panelY + HEAD - 4, viewBottom = panelY + panelH - 10 - FOOT;
     const maxScroll = Math.max(0, bodyH - (viewBottom - (panelY + HEAD)));
     this.sheetScroll = Math.min(Math.max(0, this.sheetScroll), maxScroll);
 
@@ -710,6 +764,92 @@ export class ShipScene extends Phaser.Scene {
       if (l.row.t === 'text') {
         l.a!.setY(y);
         body.add(l.a!);
+      } else if (l.row.t === 'heading') {
+        l.a!.setY(y + 4);
+        body.add(l.a!);
+      } else if (l.row.t === 'switch') {
+        const row = l.row;
+        l.a!.setY(y + 8);
+        l.b!.setY(y + 8 + l.a!.height + 2);
+        const px = X + WID - 54, py = y + l.h / 2 - 15;
+        const g = this.add.graphics();
+        g.fillStyle(row.on ? C.beamDeep : C.panelEdge, 1).fillRoundedRect(px, py, 54, 30, 15);
+        g.fillStyle(0xffffff, 1).fillCircle(row.on ? px + 39 : px + 15, py + 15, 11);
+        g.lineStyle(1, C.panelEdge, 1).lineBetween(X, y + l.h - 1, X + WID, y + l.h - 1);
+        const z = this.add.zone(X + WID / 2, y + l.h / 2, WID, l.h - 4).setInteractive();
+        z.on('pointerdown', begin);
+        z.on('pointerup', (p: Phaser.Input.Pointer) => { if (tapOk(p)) row.fn(); });
+        zones.push({ z, top: y, bottom: y + l.h });
+        body.add([g, l.a!, l.b!, z]);
+      } else if (l.row.t === 'cargo') {
+        const row = l.row;
+        const look = ITEM_LOOK[row.item];
+        const g = this.add.graphics();
+        g.lineStyle(1, C.panelEdge, 1).lineBetween(X, y + l.h - 1, X + WID, y + l.h - 1);
+        const cy = y + l.h / 2;
+        if (row.forSale) {
+          g.lineStyle(3, row.ticked ? C.crit : C.ghost, 1).strokeRoundedRect(X, cy - 13, 26, 26, 7);
+          if (row.ticked) g.fillStyle(C.crit, 1).fillRoundedRect(X + 5, cy - 8, 16, 16, 4);
+        }
+        g.fillStyle(look.color, 1).fillCircle(X + 42, cy, 9);
+        g.lineStyle(2, C.hullOutline, 1).strokeCircle(X + 42, cy, 9);
+        l.a!.setY(y + 9);
+        l.b!.setY(y + 9 + l.a!.height + 1);
+        const bx = X + WID - CG_SELL, by = cy - 22;
+        const ok = row.forSale && row.canSell;
+        g.fillStyle(ok ? C.crit : C.panelEdge, 1).fillRoundedRect(bx, by, CG_SELL, 44, 16);
+        const lab = this.txt(bx + CG_SELL / 2, cy, row.sellLabel, { fontFamily: FONT, fontSize: '15px', fontStyle: '600', color: ok ? '#0B1020' : T.dim, align: 'center' }).setOrigin(0.5);
+        body.add([g, l.a!, l.b!, lab]);
+        if (row.forSale) {
+          const tz = this.add.zone(X + 13, cy, 44, 56).setInteractive();
+          tz.on('pointerdown', begin);
+          tz.on('pointerup', (p: Phaser.Input.Pointer) => { if (tapOk(p)) row.onTick(); });
+          zones.push({ z: tz, top: cy - 28, bottom: cy + 28 });
+          body.add(tz);
+        }
+        const sz = this.add.zone(bx + CG_SELL / 2, cy, CG_SELL, 44).setInteractive();
+        sz.on('pointerdown', begin);
+        sz.on('pointerup', (p: Phaser.Input.Pointer) => { if (tapOk(p) && ok) row.onSell(); });
+        zones.push({ z: sz, top: by, bottom: by + 44 });
+        body.add(sz);
+      } else if (l.row.t === 'hold') {
+        // hold-to-confirm: the fill grows while the finger stays down; letting go cancels
+        const row = l.row;
+        const g = this.add.graphics();
+        const lab = this.txt(W / 2, y + 34, row.label, { fontFamily: FONT, fontSize: '18px', fontStyle: '600', color: '#0B1020' }).setOrigin(0.5);
+        const draw = (f: number) => {
+          g.clear();
+          g.fillStyle(C.panelEdge, 1).fillRoundedRect(X, y + 8, WID, 52, 26);
+          if (f > 0) {
+            const wd = Math.max(52, WID * f);
+            g.fillStyle(C.coral, 1).fillRoundedRect(X, y + 8, wd, 52, 26);
+          }
+          g.lineStyle(3, C.coral, 1).strokeRoundedRect(X, y + 8, WID, 52, 26);
+        };
+        draw(0);
+        lab.setColor(T.text);
+        const prog = { v: 0 };
+        let tw: Phaser.Tweens.Tween | undefined;
+        const cancel = () => {
+          if (!tw) return;
+          tw.stop(); tw = undefined; prog.v = 0; draw(0);
+        };
+        const z = this.add.zone(W / 2, y + 34, WID, 52).setInteractive();
+        z.on('pointerdown', (p: Phaser.Input.Pointer) => {
+          begin(p);
+          cancel();
+          tw = this.tweens.add({
+            targets: prog, v: 1, duration: HOLD_RESET_MS, ease: 'Linear',
+            onUpdate: () => { if (moved) cancel(); else draw(prog.v); },
+            onComplete: () => { tw = undefined; row.fn(); },
+          });
+        });
+        z.on('pointerup', cancel);
+        z.on('pointerout', cancel);
+        z.on('pointerupoutside', cancel);
+        box.once('destroy', () => tw?.stop());
+        zones.push({ z, top: y + 8, bottom: y + 60 });
+        body.add([g, lab, z]);
       } else if (l.row.t === 'button') {
         const row = l.row;
         const g = this.add.graphics();
@@ -743,6 +883,16 @@ export class ShipScene extends Phaser.Scene {
       y += l.h;
     }
     syncZones();
+    if (footer) {
+      const fy = panelY + panelH - 10 - 46; // lands where the Sell button sits on the main screen
+      const fg = this.add.graphics();
+      fg.fillStyle(footer.can ? C.crit : C.panelEdge, 1).fillRoundedRect(X, fy, WID, 46, 23);
+      fg.lineStyle(3, C.hullOutline, 1).strokeRoundedRect(X, fy, WID, 46, 23);
+      const fl = this.txt(W / 2, fy + 23, footer.label, { fontFamily: FONT, fontSize: '18px', fontStyle: '600', color: footer.can ? '#0B1020' : T.dim }).setOrigin(0.5);
+      const fz = this.add.zone(W / 2, fy + 23, WID, 46).setInteractive();
+      fz.on('pointerup', () => { if (footer.can) footer.fn(); });
+      box.add([fg, fl, fz]);
+    }
     return box;
   }
 
@@ -901,7 +1051,7 @@ export class ShipScene extends Phaser.Scene {
       }
       const lv = SMASHER.levels[sm.level - 1];
       const nx = SMASHER.levels[sm.level];
-      rows.push({ t: 'text', text: `Smashes ${lv.hpPerSec} HP per second. Holds ${lv.queue} rocks (${sm.queue.length} now). Tap Send on the stage to give it a rock; geodes stay with your hands.` });
+      rows.push({ t: 'text', text: `Smashes ${lv.hpPerSec} HP per second. Holds ${lv.queue} rocks (${sm.queue.length} now). Tap Smash on the stage to give it a rock; geodes stay with your hands.` });
       rows.push(this.upgradeCard(
         `Level ${sm.level}`,
         nx ? `Next: ${nx.hpPerSec} HP/s, holds ${nx.queue}${sm.level + 1 >= SMASHER.autoIntakeLevel ? ', feeds itself from the Bay' : ''}.` : '',
@@ -911,7 +1061,13 @@ export class ShipScene extends Phaser.Scene {
     });
   }
 
+  /** The Sell button: one tap while there is only Ore; after the first Plate it opens the Cargo sheet. */
   private onSell(): void {
+    if (sellMode(this.state) === 'cargo') {
+      if (this.sheetKind === 'cargo') this.closeSheet();
+      else this.showCargoSheet();
+      return;
+    }
     const out = sellAll(this.state);
     if (out.state === this.state) {
       const holding = SELLABLE.some((k) => Math.floor(this.state.items[k]) > 0);
@@ -919,8 +1075,161 @@ export class ShipScene extends Phaser.Scene {
       return;
     }
     this.apply(out.state);
-    const total = out.events.reduce((n, e) => n + (e.kind === 'sold' ? e.credits : 0), 0);
-    this.floatText(W - 90, ACTION.y - 6, `+${total}`, T.gold);
+    this.floatSold(out.events);
+  }
+
+  private floatSold(events: GameEvent[]): void {
+    const total = events.reduce((n, e) => n + (e.kind === 'sold' ? e.credits : 0), 0);
+    if (total > 0) this.floatText(80, 70, `+${fmtNum(total)}`, T.gold);
+  }
+
+  /** Items the Cargo footer will sell: every for-sale row that is still ticked. */
+  private tickedItems(): ItemId[] {
+    return cargoRows(this.state).filter((r) => r.forSale && !this.cargoOff.has(r.item)).map((r) => r.item);
+  }
+
+  /** The Cargo sheet: one row per item, per-row Sell, tick boxes, and a sticky "Sell selected" footer. */
+  private showCargoSheet(): void {
+    if (this.sheetKind !== 'cargo') this.cargoOff.clear();
+    this.showSheet('cargo', () => {
+      const st = this.state;
+      const rows: SheetRow[] = [];
+      for (const r of cargoRows(st)) {
+        const note = !r.forSale
+          ? 'Not for sale. Needed for upgrades later.'
+          : [`${r.price} credit${r.price === 1 ? '' : 's'} each`, r.keptNote, r.tip].filter(Boolean).join('. ');
+        rows.push({
+          t: 'cargo', item: r.item, count: r.count, price: r.price, note, forSale: r.forSale,
+          ticked: !this.cargoOff.has(r.item), canSell: r.surplus > 0,
+          sellLabel: !r.forSale ? 'Keep' : r.surplus > 0 ? `Sell ${fmtNum(r.surplus)}` : 'Sell',
+          onTick: () => {
+            if (this.cargoOff.has(r.item)) this.cargoOff.delete(r.item); else this.cargoOff.add(r.item);
+            this.refreshSheet();
+          },
+          onSell: () => {
+            const out = sellSurplus(this.state, r.item);
+            if (out.state === this.state) return;
+            this.apply(out.state);
+            this.floatSold(out.events);
+            this.refreshSheet();
+          },
+        });
+      }
+      rows.push({
+        t: 'switch', title: 'Hold materials for my goal',
+        sub: st.flags.holdForGoal ? 'On: Sell skips what your next goal needs.' : 'Off: Sell sells everything you pick.',
+        on: st.flags.holdForGoal,
+        fn: () => { this.apply(setHoldForGoal(this.state, !this.state.flags.holdForGoal).state); this.refreshSheet(); },
+      });
+      const picked = this.tickedItems();
+      const total = sellValue(st, picked);
+      return {
+        title: 'Cargo', rows,
+        footer: {
+          label: total > 0 ? `Sell selected +${fmtNum(total)}` : 'Nothing selected to sell',
+          can: total > 0,
+          fn: () => {
+            const out = sellSelected(this.state, this.tickedItems());
+            if (out.state === this.state) return;
+            this.apply(out.state);
+            this.closeSheet();
+            this.floatSold(out.events);
+          },
+        },
+      };
+    });
+  }
+
+  // ---- menu: version, help, save copy / paste, reset ---------------------------------------------
+  private versionLine(): string {
+    return formatVersion(__APP_VERSION__, __BUILD_SHA__, __BUILD_DATE__);
+  }
+
+  private showMenu(): void {
+    this.showSheet('menu', () => ({
+      title: 'Menu',
+      rows: [
+        { t: 'text', text: `Version ${this.versionLine()}` },
+        { t: 'button', label: 'Help', fn: () => this.showHelp() },
+        { t: 'button', label: 'Copy save', fn: () => this.copySave() },
+        { t: 'button', label: 'Paste save', fn: () => this.pasteSave() },
+        { t: 'button', label: 'Reset save', fn: () => this.showResetConfirm() },
+      ],
+    }));
+  }
+
+  private showHelp(): void {
+    this.showSheet('help', () => {
+      const rows: SheetRow[] = [];
+      for (const card of HELP) {
+        rows.push({ t: 'heading', text: card.title });
+        for (const line of card.lines) rows.push({ t: 'text', text: line });
+      }
+      rows.push({ t: 'button', label: 'Back', fn: () => this.showMenu() });
+      return { title: 'Help', rows };
+    });
+  }
+
+  private copySave(): void {
+    const text = serialize(stamp(this.state, Date.now()));
+    const fallback = () => { window.prompt('Copy this save text:', text); };
+    try {
+      if (!navigator.clipboard) { fallback(); return; }
+      navigator.clipboard.writeText(text).then(() => this.showToast('Save copied'), fallback);
+    } catch {
+      fallback();
+    }
+  }
+
+  private pasteSave(): void {
+    const raw = window.prompt('Paste your save text here:');
+    if (!raw) return;
+    const r = parseSave(raw.trim());
+    if (!r.ok) { this.showToast('That is not a Last Tug save'); return; }
+    this.showImportConfirm(r.state);
+  }
+
+  private showImportConfirm(incoming: GameState): void {
+    this.showSheet('import', () => ({
+      title: 'Replace your save?',
+      rows: [
+        { t: 'text', text: `The pasted save has ${fmtNum(incoming.credits)} credits, ${incoming.ship.ownedCells.length} hull tiles and ${fmtNum(incoming.stats.rocks)} rocks cracked.` },
+        { t: 'text', text: `Your current game has ${fmtNum(this.state.credits)} credits and ${this.state.ship.ownedCells.length} hull tiles. This replaces it.`, color: T.text },
+        {
+          t: 'button', label: 'Replace my save',
+          fn: () => {
+            this.loadState(stamp(incoming, Date.now())); // "now", so pasting never earns free offline time
+            this.showToast('Save loaded');
+          },
+        },
+        { t: 'button', label: 'Cancel', fn: () => this.showMenu() },
+      ],
+    }));
+  }
+
+  private showResetConfirm(): void {
+    this.showSheet('reset', () => ({
+      title: 'Reset save?',
+      rows: [
+        { t: 'text', text: 'This wipes your ship, credits and progress and starts again. Copy your save first if you want a backup.', color: T.text },
+        {
+          t: 'hold', label: 'Hold to reset',
+          fn: () => { this.loadState(createInitialState()); this.showToast('Save reset'); },
+        },
+        { t: 'button', label: 'Cancel', fn: () => this.showMenu() },
+      ],
+    }));
+  }
+
+  /** Replace the whole game state (reset / paste) and rebuild everything that is derived from it. */
+  private loadState(next: GameState): void {
+    this.endHold();
+    this.cargoOff.clear();
+    this.state = next;
+    this.persist();
+    this.closeSheet();
+    this.updateLimits(true);
+    this.redraw();
   }
 
   private handleEvents(events: GameEvent[], x: number, y: number): void {
@@ -945,11 +1254,18 @@ export class ShipScene extends Phaser.Scene {
           if (e.shard) this.floatText(STAGE.cx, STAGE.cy - 96, 'Core Shard!', '#8A5CE0');
           break;
         case 'rock_arrived':
-          this.chips(STAGE.cx, STAGE.y + 10, C.beam, 8);
+          if (e.to === 'smasher') {
+            this.floatAtModule('smasher', 0, 'To Smasher', T.dim);
+          } else {
+            // pop over the Bay slot the rock landed in
+            const slot = Math.max(0, Math.min(this.state.bay.length, BAL.baySlots) - 1);
+            this.chips(BAY.x + slot * (BAY.size + BAY.gap) + BAY.size / 2, BAY.y + BAY.size / 2, C.beam, 8);
+            this.floatText(BAY.x + (BAY.size * 3 + BAY.gap * 2) / 2, BAY.y - 8, `+1 Bay`, T.dim);
+          }
           break;
         case 'sent':
-          this.chips(STAGE.cx, STAGE.cy, C.beam, 10);
-          this.floatText(STAGE.cx, STAGE.cy - 30, 'Sent!', T.gold);
+          this.chips(STAGE.cx, STAGE.cy, C.crusher, 10);
+          this.floatText(STAGE.cx, STAGE.cy - 30, 'To the Smasher', T.gold);
           break;
         case 'smashed':
           this.floatAtModule('smasher', 0, `+${e.ore} Ore`, T.text);
@@ -998,6 +1314,8 @@ export class ShipScene extends Phaser.Scene {
     tabShip.on('pointerdown', () => this.closeSheet());
     const tabBuild = this.add.zone(W * 0.75, H - 42, 150, 80).setInteractive().setDepth(31);
     tabBuild.on('pointerdown', () => (this.sheetKind === 'workshop' ? this.closeSheet() : this.showWorkshop()));
+    const gearZ = this.add.zone(352, 88, 48, 48).setInteractive();
+    gearZ.on('pointerdown', () => (this.sheetKind === 'menu' ? this.closeSheet() : this.showMenu()));
     const sellZ = this.add.zone(238 + 68, ACTION.y + ACTION.h / 2, 136, ACTION.h).setInteractive();
     sellZ.on('pointerdown', () => this.onSell());
 
@@ -1045,6 +1363,7 @@ export class ShipScene extends Phaser.Scene {
     // --- module overlays: every beam (ring + countdown) and the Smelter (progress ring)
     const hand = handStats(st);
     const counting = st.beams.some((b) => b.status === 'counting');
+    const room = bayRoom(st);
     const used = new Set<number>();
     const goalId = currentGoal(st)?.id;
     st.ship.modules.filter((m) => m.defId === 'beam').forEach((m, i) => {
@@ -1058,8 +1377,8 @@ export class ShipScene extends Phaser.Scene {
         sg.lineStyle(4, C.beam, 1).beginPath().arc(bcx, bcy, 18, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac, false).strokePath();
         sg.lineStyle(4, C.hull, 0.35).strokeCircle(bcx, bcy, 18);
         label = String(Math.ceil(Math.max(0, beam.remaining)));
-      } else if (beam.status === 'idle' && c.rock) {
-        sg.lineStyle(3, C.hull, 0.35).strokeRoundedRect(bp.x + 2, bp.y + 2, TILE - 4, TILE - 4, 10); // locked: rock in stage
+      } else if (beam.status === 'idle' && room <= 0) {
+        sg.lineStyle(3, C.hull, 0.35).strokeRoundedRect(bp.x + 2, bp.y + 2, TILE - 4, TILE - 4, 10); // no room in the Bay
       } else if (beam.status === 'idle') {
         const pulse = 0.55 + 0.45 * Math.sin(now * 5);
         sg.lineStyle(3, C.crit, st.flags.tappedBeam ? 0.9 : pulse).strokeRoundedRect(bp.x + 2, bp.y + 2, TILE - 4, TILE - 4, 10);
@@ -1149,32 +1468,49 @@ export class ShipScene extends Phaser.Scene {
     const hc = c.lockout > 0 ? 0x9fd8ff : this.heatColor(heatFrac);
     if (heatFrac > 0) g.fillStyle(hc, 1).fillRoundedRect(hx, hy, Math.max(16, hw * heatFrac), 16, 8);
     this.setText(this.tx.heat, hx + 18, STRIP_Y + 8, 'Heat');
-    this.setText(this.tx.bay, 224, STRIP_Y + 26, 'Bay');
+    const bayFull = st.bay.length >= BAL.baySlots;
+    this.setText(this.tx.bay, 218, STRIP_Y + 21, `Bay\n${st.bay.length}/${BAL.baySlots}`, bayFull ? T.gold : T.dim);
+    const flying = st.beams
+      .filter((b) => b.status !== 'idle')
+      .map((b) => (b.status === 'blocked' ? 1 : 1 - b.remaining / BAL.beamCountdown))
+      .sort((a, b) => b - a); // the rock that lands first takes the first free slot
     for (let i = 0; i < BAL.baySlots; i++) {
-      const sx = 250 + i * 40, sy = STRIP_Y + 6;
-      g.fillStyle(C.deck, 1).fillRoundedRect(sx, sy, 30, 30, 9);
-      g.lineStyle(2, C.deckEdge, 1).strokeRoundedRect(sx, sy, 30, 30, 9);
+      const sx = BAY.x + i * (BAY.size + BAY.gap), sy = BAY.y, mid = BAY.size / 2;
+      g.fillStyle(C.deck, 1).fillRoundedRect(sx, sy, BAY.size, BAY.size, 10);
+      g.lineStyle(2, C.deckEdge, 1).strokeRoundedRect(sx, sy, BAY.size, BAY.size, 10);
       const rock = st.bay[i];
-      if (rock) g.fillStyle(rock.geode ? 0x8a5ce0 : 0xa9937c, 1).fillCircle(sx + 15, sy + 15, 9);
+      if (rock) {
+        g.fillStyle(rock.geode ? 0x8a5ce0 : 0xa9937c, 1).fillCircle(sx + mid, sy + mid, 11);
+        g.lineStyle(2, 0x2a2320, 1).strokeCircle(sx + mid, sy + mid, 11);
+      } else {
+        const p = flying[i - st.bay.length]; // progress of the rock on its way to this slot
+        if (p !== undefined) {
+          const pulse = 0.6 + 0.4 * Math.sin(now * 8);
+          g.lineStyle(2, C.beam, pulse).strokeRoundedRect(sx, sy, BAY.size, BAY.size, 10);
+          g.fillStyle(0xa9937c, 0.35 + 0.5 * p).fillCircle(sx + mid, sy + mid, 3 + 8 * p);
+        }
+      }
     }
 
-    // --- action row: Fire (all idle beams) + Sell (everything not reserved for the goal)
+    // --- action row: Fire (as many idle beams as the Bay has room for) + Sell
     const idleN = st.beams.filter((b) => b.status === 'idle').length;
-    const ready = idleN > 0 && !c.rock;
-    g.fillStyle(ready ? C.beamDeep : C.panelEdge, 1).fillRoundedRect(16, ACTION.y, 210, ACTION.h, 23);
+    const canFire = idleN > 0 && room > 0;
+    const fireN = Math.min(idleN, room);
+    g.fillStyle(canFire ? C.beamDeep : C.panelEdge, 1).fillRoundedRect(16, ACTION.y, 210, ACTION.h, 23);
     g.lineStyle(3, C.hullOutline, 1).strokeRoundedRect(16, ACTION.y, 210, ACTION.h, 23);
     const wait = Math.max(0, ...st.beams.filter((b) => b.status === 'counting').map((b) => b.remaining));
-    const fireText = idleN > 0
-      ? (c.rock ? 'Rock in stage' : idleN > 1 ? `Fire ${idleN} beams` : 'Fire beam')
-      : counting ? `Incoming ${wait.toFixed(1)}s` : 'Bay full';
-    this.setText(this.tx.fire, 121, ACTION.y + ACTION.h / 2, fireText, ready ? '#0B1020' : T.dim);
+    const fireText = canFire
+      ? (fireN > 1 ? `Fire ${fireN} beams` : 'Fire beam')
+      : counting ? `Incoming ${wait.toFixed(1)}s` : `Bay full ${st.bay.length}/${BAL.baySlots}`;
+    this.setText(this.tx.fire, 121, ACTION.y + ACTION.h / 2, fireText, canFire ? '#0B1020' : T.dim);
 
     const val = sellValue(st);
     const canSell = val > 0;
+    const cargoMode = sellMode(st) === 'cargo';
     const sellPulse = canSell && goalId === 'sell' ? 0.6 + 0.4 * Math.sin(now * 6) : 1;
     g.fillStyle(canSell ? C.crit : C.panelEdge, canSell ? sellPulse : 1).fillRoundedRect(238, ACTION.y, 136, ACTION.h, 23);
     g.lineStyle(3, C.hullOutline, 1).strokeRoundedRect(238, ACTION.y, 136, ACTION.h, 23);
-    this.setText(this.tx.sell, 306, ACTION.y + ACTION.h / 2, canSell ? `Sell +${val}` : 'Sell', canSell ? '#0B1020' : T.dim);
+    this.setText(this.tx.sell, 306, ACTION.y + ACTION.h / 2, canSell ? `${cargoMode ? 'Sell…' : 'Sell'} +${fmtNum(val)}` : cargoMode ? 'Sell…' : 'Sell', canSell ? '#0B1020' : T.dim);
     this.setText(this.tx.hp, -100, -100, '');
     this.drawArrows(g);
   }
@@ -1190,6 +1526,7 @@ export class ShipScene extends Phaser.Scene {
     return f >= 0.9 ? C.coral : f >= 0.7 ? C.crusher : f >= 0.5 ? C.crit : C.beam;
   }
 
+  /** The Smash button on the stage: gives the stage rock to the Smasher. Orange like the Smasher tile. */
   private drawSend(g: Phaser.GameObjects.Graphics, st: GameState): void {
     const x = 290, y = STAGE.cy - 28, w = 76, h = 56;
     if (!st.smasher.repaired || !st.crusher.rock) {
@@ -1198,10 +1535,12 @@ export class ShipScene extends Phaser.Scene {
     }
     const chk = canSend(st);
     const ok = chk.ok;
+    const cap = smasherQueueCap(st);
     const pulse = ok && currentGoal(st)?.id === 'send' ? 0.6 + 0.4 * Math.sin(this.elapsed * 6) : 1;
-    g.fillStyle(ok ? C.beam : C.panelEdge, ok ? pulse : 1).fillRoundedRect(x, y, w, h, 18);
+    g.fillStyle(ok ? C.crusher : C.panelEdge, ok ? pulse : 1).fillRoundedRect(x, y, w, h, 18);
     g.lineStyle(3, C.hullOutline, 1).strokeRoundedRect(x, y, w, h, 18);
-    this.setText(this.tx.send, x + w / 2, y + h / 2, ok ? 'Send' : chk.reason === 'geode' ? 'Geode' : 'Full', ok ? '#0B1020' : T.dim);
+    const label = ok ? `Smash\n${st.smasher.queue.length}/${cap}` : chk.reason === 'geode' ? 'Geode\nby hand' : `Full\n${st.smasher.queue.length}/${cap}`;
+    this.setText(this.tx.send, x + w / 2, y + h / 2, label, ok ? '#0B1020' : T.dim);
   }
 
   /** Smasher tile overlay: progress ring on the head rock, queue pips underneath. */

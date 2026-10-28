@@ -107,12 +107,12 @@ describe('applyOffline', () => {
   });
 });
 
-describe('save v4 -> v5', () => {
+describe('save v4 -> v6', () => {
   it('adds savedAt = 0 so an old save earns no offline time, and round-trips', () => {
     const v4 = { ...createInitialState(), version: 4, savedAt: undefined } as unknown as Record<string, unknown>;
     delete v4.savedAt;
     const s = deserialize(JSON.stringify(v4));
-    expect(s.version).toBe(5);
+    expect(s.version).toBe(6);
     expect(s.savedAt).toBe(0);
     expect(deserialize(serialize(s))).toEqual(s);
     expect(deserialize(serialize(stamp(s, T0))).savedAt).toBe(T0);

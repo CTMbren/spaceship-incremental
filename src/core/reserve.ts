@@ -33,7 +33,7 @@ export function structureGoal(s: GameState): { id: StructureGoalId; cost: Cost }
  * This is what the goal needs directly (the Smelter itself may still use everything else).
  */
 export function reserved(s: GameState): Partial<Record<ItemId, number>> {
-  if (s.stats.sold < 1) return {};
+  if (s.stats.sold < 1 || !s.flags.holdForGoal) return {};
   return structureGoal(s)?.cost.items ?? {};
 }
 
@@ -61,7 +61,7 @@ export const availableQty = (s: GameState, item: ItemId): number =>
 /** Items the Sell button handles (Core Shards are kept). */
 export const SELLABLE: readonly ItemId[] = ['ore', 'ice', 'plate', 'coolant', 'circuit'];
 
-/** Credits Sell would pay right now. */
-export function sellValue(s: GameState): number {
-  return SELLABLE.reduce((sum, item) => sum + availableQty(s, item) * PRICES[item], 0);
+/** Credits selling the given items (default: all sellable) would pay right now. */
+export function sellValue(s: GameState, items: readonly ItemId[] = SELLABLE): number {
+  return SELLABLE.reduce((sum, item) => sum + (items.includes(item) ? availableQty(s, item) * PRICES[item] : 0), 0);
 }

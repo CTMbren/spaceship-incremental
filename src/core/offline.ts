@@ -53,7 +53,7 @@ function fastForward(start: GameState, effective: number): GameState {
     if (dt <= 0) break;
     if (s.smasher.repaired) {
       if (s.crusher.rock && canSend(s).ok) s = sendToSmasher(s).state;
-      if (!s.crusher.rock) s = tapAllBeams(s).state;
+      s = tapAllBeams(s).state; // fires as many beams as the Bay has room for
     }
     s = tick(s, dt, false).state;
   }

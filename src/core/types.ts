@@ -119,13 +119,15 @@ export interface GameState {
   stats: Stats;
   /** Geodes opened since the last guaranteed Core Shard. Persists across Jump. */
   pity: number;
-  flags: { tappedBeam: boolean; usedHold: boolean };
+  /** holdForGoal: Sell and the Smelter keep back what the current goal needs (Cargo sheet switch). */
+  flags: { tappedBeam: boolean; usedHold: boolean; holdForGoal: boolean };
   /** Epoch ms the game was last seen (stamped by the scene when saving); 0 = never. Drives offline catch-up. */
   savedAt: number;
 }
 
 export type GameEvent =
-  | { kind: 'rock_arrived'; geode: boolean }
+  /** `to` says where the rock went: the Bay, or straight into the Smasher queue (auto-intake). */
+  | { kind: 'rock_arrived'; geode: boolean; to?: 'bay' | 'smasher' }
   | { kind: 'beam_blocked' }
   | { kind: 'hit'; crit: boolean }
   | { kind: 'overheat' }
