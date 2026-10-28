@@ -48,6 +48,7 @@ export const HELP: readonly HelpCard[] = [
     lines: [
       'The Build tab holds every upgrade: Hand Tools, beams, Smelter, Smasher.',
       'Tap a dotted Open tile on the ship to build a module there, or buy a new hull tile to make room.',
+      'You can build up to 3 Smelters and 3 Smashers. Each copy costs more than the last and has its own upgrades. Tap one to upgrade it, Move it, or Sell it for 75% back.',
     ],
   },
   {

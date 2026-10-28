@@ -14,7 +14,7 @@ function base(over: Partial<GameState> = {}): GameState {
   const s = createInitialState();
   return {
     ...s,
-    smasher: { repaired: true, level: 1, queue: [] },
+    smashers: [{ uid: 2, paid: { credits: 0 }, repaired: true, level: 1, queue: [] }],
     crusher: { ...s.crusher, rock: dust(), weakT: 5, weakX: 0, weakY: 0 },
     ...over,
   };
@@ -38,7 +38,7 @@ describe('rebalanced numbers', () => {
 describe('Rusty Smasher and repair', () => {
   it('starts rusty and cannot receive rocks', () => {
     const s = createInitialState();
-    expect(s.smasher.repaired).toBe(false);
+    expect(s.smashers[0].repaired).toBe(false);
     expect(canSend({ ...s, crusher: { ...s.crusher, rock: dust() } })).toMatchObject({ ok: false, reason: 'rusty' });
   });
   it('repair needs the materials, then spends them and repairs once', () => {
@@ -48,7 +48,7 @@ describe('Rusty Smasher and repair', () => {
     const r = repairSmasher(rich);
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.state.smasher.repaired).toBe(true);
+      expect(r.state.smashers[0].repaired).toBe(true);
       expect(r.state.items.plate).toBe(10 - 8);
       expect(repairSmasher(r.state)).toEqual({ ok: false, reason: 'already' });
     }
@@ -60,8 +60,8 @@ describe('sendToSmasher', () => {
     const s = base({ bay: [dust()] });
     const hurt = { ...s, crusher: { ...s.crusher, rock: dust(5) } };
     const r = sendToSmasher(hurt);
-    expect(r.state.smasher.queue).toHaveLength(1);
-    expect(r.state.smasher.queue[0].hp).toBe(5);
+    expect(r.state.smashers[0].queue).toHaveLength(1);
+    expect(r.state.smashers[0].queue[0].hp).toBe(5);
     expect(r.state.crusher.rock).toBeNull();
     expect(r.state.stats.sent).toBe(1);
     const after = tick(r.state, 0.05).state;
@@ -69,8 +69,8 @@ describe('sendToSmasher', () => {
     expect(after.bay).toHaveLength(0);
   });
   it('rejects when full, with a geode, with no rock, and does not mutate the input', () => {
-    const full = base({ smasher: { repaired: true, level: 1, queue: [dust(), dust()] } });
-    expect(canSend(full)).toMatchObject({ ok: false, reason: 'full', label: 'Smasher full 2/2' });
+    const full = base({ smashers: [{ uid: 2, paid: { credits: 0 }, repaired: true, level: 1, queue: [dust(), dust()] }] });
+    expect(canSend(full)).toMatchObject({ ok: false, reason: 'full', label: 'Smashers full 2/2' });
     expect(sendToSmasher(full).state).toBe(full);
     const g = base();
     const withGeode = { ...g, crusher: { ...g.crusher, rock: geode() } };
@@ -84,31 +84,31 @@ describe('sendToSmasher', () => {
 
 describe('Smasher working', () => {
   it('smashes the head rock at its HP/s and pays Ore (L1: 14 HP in 15.6 s)', () => {
-    let s = base({ smasher: { repaired: true, level: 1, queue: [dust()] }, crusher: { ...createInitialState().crusher, rock: null } });
+    let s = base({ smashers: [{ uid: 2, paid: { credits: 0 }, repaired: true, level: 1, queue: [dust()] }], crusher: { ...createInitialState().crusher, rock: null } });
     s = run(s, 15);
-    expect(s.smasher.queue).toHaveLength(1);
+    expect(s.smashers[0].queue).toHaveLength(1);
     expect(s.items.ore).toBe(0);
     s = run(s, 1);
-    expect(s.smasher.queue).toHaveLength(0);
+    expect(s.smashers[0].queue).toHaveLength(0);
     expect(s.items.ore).toBe(BAL.rock.dust.ore);
     expect(s.stats.smashed).toBe(1);
   });
   it('is dt-invariant: one 10 s step equals 200 steps of 0.05 s', () => {
-    const start = base({ smasher: { repaired: true, level: 3, queue: [dust(), dust(), dust()] }, crusher: { ...createInitialState().crusher, rock: null } });
+    const start = base({ smashers: [{ uid: 2, paid: { credits: 0 }, repaired: true, level: 3, queue: [dust(), dust(), dust()] }], crusher: { ...createInitialState().crusher, rock: null } });
     const big = tick(start, 10).state;
     const small = run(start, 10);
     expect(big.items.ore).toBe(small.items.ore);
-    expect(big.smasher.queue.map((r) => Math.round(r.hp * 100))).toEqual(small.smasher.queue.map((r) => Math.round(r.hp * 100)));
+    expect(big.smashers[0].queue.map((r) => Math.round(r.hp * 100))).toEqual(small.smashers[0].queue.map((r) => Math.round(r.hp * 100)));
   });
   it('a rusty Smasher does nothing', () => {
-    const s = base({ smasher: { repaired: false, level: 1, queue: [dust()] } });
+    const s = base({ smashers: [{ uid: 2, paid: { credits: 0 }, repaired: false, level: 1, queue: [dust()] }] });
     expect(run(s, 30).items.ore).toBe(0);
   });
   it('conserves Ore: every rock pays exactly once', () => {
-    let s = base({ smasher: { repaired: true, level: 4, queue: [dust(), dust(), dust(), dust(), dust()] }, crusher: { ...createInitialState().crusher, rock: null } });
+    let s = base({ smashers: [{ uid: 2, paid: { credits: 0 }, repaired: true, level: 4, queue: [dust(), dust(), dust(), dust(), dust()] }], crusher: { ...createInitialState().crusher, rock: null } });
     s = run(s, 60);
     expect(s.items.ore).toBe(5 * BAL.rock.dust.ore);
-    expect(s.smasher.queue).toHaveLength(0);
+    expect(s.smashers[0].queue).toHaveLength(0);
   });
   it('upgrades cost credits, raise the queue cap, and stop at level 4', () => {
     let s = base();
@@ -118,7 +118,7 @@ describe('Smasher working', () => {
       const r = upgradeSmasher(s);
       expect(r.ok).toBe(true);
       if (r.ok) s = r.state;
-      expect(s.smasher.level).toBe(lv);
+      expect(s.smashers[0].level).toBe(lv);
     }
     expect(upgradeSmasher(s)).toEqual({ ok: false, reason: 'max_level' });
     expect(s.credits).toBe(5000 - 150 - 450 - 1350);
@@ -130,20 +130,20 @@ describe('auto-intake (Smasher L2+)', () => {
   const beamDone = (s: GameState): GameState => ({ ...s, beams: [{ status: 'counting', remaining: 0.01, level: 1 }] });
   it('L1: rocks go to the Bay, never the queue', () => {
     const s = tick(beamDone(base({ crusher: { ...createInitialState().crusher, rock: null } })), 0.1).state;
-    expect(s.smasher.queue).toHaveLength(0);
+    expect(s.smashers[0].queue).toHaveLength(0);
     expect(s.crusher.rock ?? s.bay[0]).toBeTruthy();
   });
   it('L2: takes plain rocks only when the Bay already holds one, so the player keeps a rock to tap', () => {
-    const l2 = { repaired: true, level: 2, queue: [] as Rock[] };
-    const emptyBay = tick(beamDone(base({ smasher: l2, bay: [] })), 0.1, false).state;
-    expect(emptyBay.smasher.queue).toHaveLength(0);
-    const withBay = tick(beamDone(base({ smasher: l2, bay: [dust()] })), 0.1, false).state;
-    expect(withBay.smasher.queue).toHaveLength(1);
+    const l2 = { uid: 2, paid: { credits: 0 }, repaired: true, level: 2, queue: [] as Rock[] };
+    const emptyBay = tick(beamDone(base({ smashers: [l2], bay: [] })), 0.1, false).state;
+    expect(emptyBay.smashers[0].queue).toHaveLength(0);
+    const withBay = tick(beamDone(base({ smashers: [l2], bay: [dust()] })), 0.1, false).state;
+    expect(withBay.smashers[0].queue).toHaveLength(1);
   });
   it('L2: geodes always go to the Bay', () => {
-    const l2 = { repaired: true, level: 2, queue: [] as Rock[] };
-    const s = tick(beamDone(base({ smasher: l2, bay: [dust()] })), 0.1, true).state;
-    expect(s.smasher.queue).toHaveLength(0);
+    const l2 = { uid: 2, paid: { credits: 0 }, repaired: true, level: 2, queue: [] as Rock[] };
+    const s = tick(beamDone(base({ smashers: [l2], bay: [dust()] })), 0.1, true).state;
+    expect(s.smashers[0].queue).toHaveLength(0);
     expect(s.bay.some((r) => r.geode) || s.crusher.rock?.geode).toBe(true);
   });
 });

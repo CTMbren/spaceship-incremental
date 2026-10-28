@@ -5,6 +5,7 @@ import { SMASHER } from '../data/smasher';
 import { canAfford } from './actions';
 import { availableQty, SELLABLE, smeltableQty } from './reserve';
 import { nextRandom } from './rng';
+import { roomiestSmasher, smasherCap, smasherReady } from './units';
 import type { GameEvent, GameState, ItemId, Rock } from './types';
 
 export interface Outcome {
@@ -40,7 +41,9 @@ function newWeakPoint(s: GameState): void {
 
 export const weakActive = (s: GameState): boolean => s.crusher.rock !== null && s.crusher.weakT < BAL.weak.active;
 
-export const smasherQueueCap = (s: GameState): number => SMASHER.levels[s.smasher.level - 1].queue;
+/** Total queue room across all repaired Smashers, and how many rocks they hold (the Smash button shows these). */
+export const smasherQueueCap = (s: GameState): number => s.smashers.reduce((n, m) => n + (m.repaired ? smasherCap(m) : 0), 0);
+export const smasherQueued = (s: GameState): number => s.smashers.reduce((n, m) => n + m.queue.length, 0);
 
 // ---- beam ------------------------------------------------------------------
 
@@ -93,14 +96,11 @@ export function tick(state: GameState, dt: number, forceGeode?: boolean): Outcom
     }
     if (beam.status === 'blocked') {
       const rock = makeRock(s, forceGeode, beam.level);
-      const sm = s.smasher;
-      const intake =
-        sm.repaired &&
-        sm.level >= SMASHER.autoIntakeLevel &&
-        !rock.geode &&
-        s.bay.length >= 1 && // the player always keeps something to tap
-        sm.queue.length < smasherQueueCap(s);
-      if (intake) {
+      // auto-intake: a level 2+ Smasher with room takes plain rocks straight from the beam (the roomiest first)
+      const sm = !rock.geode && s.bay.length >= 1 /* the player always keeps something to tap */
+        ? roomiestSmasher(s, SMASHER.autoIntakeLevel)
+        : null;
+      if (sm) {
         sm.queue.push(rock);
         beam.status = 'idle';
         beam.remaining = 0;
@@ -143,28 +143,29 @@ export function tick(state: GameState, dt: number, forceGeode?: boolean): Outcom
     c.holdAcc = 0;
   }
 
-  // Smasher: work through the queue at its rate. Carries leftover damage to the next rock.
-  if (s.smasher.repaired && s.smasher.queue.length > 0) {
-    let dmg = SMASHER.levels[s.smasher.level - 1].hpPerSec * dt;
-    while (dmg > 0 && s.smasher.queue.length > 0) {
-      const head = s.smasher.queue[0];
+  // Smashers: each works through its own queue at its rate. Carries leftover damage to the next rock.
+  for (const unit of s.smashers) {
+    if (!unit.repaired || unit.queue.length === 0) continue;
+    let dmg = SMASHER.levels[unit.level - 1].hpPerSec * dt;
+    while (dmg > 0 && unit.queue.length > 0) {
+      const head = unit.queue[0];
       if (head.hp > dmg) {
         head.hp -= dmg;
         dmg = 0;
       } else {
         dmg -= head.hp;
-        s.smasher.queue.shift();
+        unit.queue.shift();
         s.items.ore += head.ore;
         s.stats.rocks += 1;
         s.stats.smashed += 1;
-        events.push({ kind: 'smashed', ore: head.ore });
+        events.push({ kind: 'smashed', ore: head.ore, uid: unit.uid });
       }
     }
   }
 
-  // Smelter: turns Ore into Plate in batches, never touching Ore reserved for the current goal.
-  const sm = s.smelter;
-  if (sm.built && sm.on) {
+  // Smelters: each turns Ore into Plate in batches from the shared stock, never touching Ore reserved for the current goal.
+  for (const sm of s.smelters) {
+    if (!sm.on) continue;
     const secPerBatch = SMELTER.levels[sm.level - 1].secPerBatch;
     let t = dt;
     while (t > 1e-12) {
@@ -179,7 +180,7 @@ export function tick(state: GameState, dt: number, forceGeode?: boolean): Outcom
         s.items.plate += SMELTER.batchOut;
         s.stats.smelted += SMELTER.batchOut;
         sm.progress = 0;
-        events.push({ kind: 'smelted', plate: SMELTER.batchOut });
+        events.push({ kind: 'smelted', plate: SMELTER.batchOut, uid: sm.uid });
       } else {
         sm.progress += t / secPerBatch;
         t = 0;
@@ -297,22 +298,21 @@ export type SendCheck =
 
 /** What the Smash button should do and say right now. */
 export function canSend(s: GameState): SendCheck {
-  if (!s.smasher.repaired) return { ok: false, reason: 'rusty', label: 'Smasher is rusty' };
+  if (!smasherReady(s)) return { ok: false, reason: 'rusty', label: 'Smasher is rusty' };
   const rock = s.crusher.rock;
   if (!rock) return { ok: false, reason: 'no_rock', label: 'No rock to smash' };
   if (rock.geode) return { ok: false, reason: 'geode', label: 'Crack this one yourself' };
-  const cap = smasherQueueCap(s);
-  if (s.smasher.queue.length >= cap) {
-    return { ok: false, reason: 'full', label: `Smasher full ${s.smasher.queue.length}/${cap}` };
+  if (!roomiestSmasher(s)) {
+    return { ok: false, reason: 'full', label: `Smashers full ${smasherQueued(s)}/${smasherQueueCap(s)}` };
   }
   return { ok: true };
 }
 
-/** Send the stage rock to the Smasher queue. Damage already dealt is kept. */
+/** Send the stage rock to the Smasher with the most room. Damage already dealt is kept. */
 export function sendToSmasher(state: GameState): Outcome {
   if (!canSend(state).ok) return { state, events: [] };
   const s = clone(state);
-  s.smasher.queue.push(s.crusher.rock!);
+  roomiestSmasher(s)!.queue.push(s.crusher.rock!);
   s.crusher.rock = null;
   s.crusher.weakT = 0;
   s.crusher.holding = false;
@@ -326,32 +326,35 @@ export type SpendResult =
   | { ok: true; state: GameState; events: GameEvent[] }
   | { ok: false; reason: 'need_credits' | 'need_items' | 'already' | 'max_level' };
 
+/** Repairs the Rusty Smasher (the one the ship starts with). */
 export function repairSmasher(state: GameState): SpendResult {
-  if (state.smasher.repaired) return { ok: false, reason: 'already' };
+  if (!state.smashers.some((m) => !m.repaired)) return { ok: false, reason: 'already' };
   const afford = canAfford(state, SMASHER.repair);
   if (afford !== 'ok') return { ok: false, reason: afford };
   const s = clone(state);
   s.credits -= SMASHER.repair.credits;
   for (const [k, v] of Object.entries(SMASHER.repair.items ?? {})) s.items[k as ItemId] -= v ?? 0;
-  s.smasher.repaired = true;
+  s.smashers.find((m) => !m.repaired)!.repaired = true;
   return { ok: true, state: s, events: [{ kind: 'repaired' }] };
 }
 
-/** Cost of the next Smasher level, or undefined at max. */
-export function nextSmasherUpgrade(s: GameState) {
-  return SMASHER.levels[s.smasher.level]?.cost;
+/** Cost of the next level of Smasher number `index` (0 = the first), or undefined at max. */
+export function nextSmasherUpgrade(s: GameState, index = 0) {
+  const sm = s.smashers[index];
+  return sm ? SMASHER.levels[sm.level]?.cost : undefined;
 }
 
-export function upgradeSmasher(state: GameState): SpendResult {
-  if (!state.smasher.repaired) return { ok: false, reason: 'need_items' };
-  const cost = nextSmasherUpgrade(state);
+export function upgradeSmasher(state: GameState, index = 0): SpendResult {
+  const sm = state.smashers[index];
+  if (!sm || !sm.repaired) return { ok: false, reason: 'need_items' };
+  const cost = nextSmasherUpgrade(state, index);
   if (!cost) return { ok: false, reason: 'max_level' };
   const afford = canAfford(state, cost);
   if (afford !== 'ok') return { ok: false, reason: afford };
   const s = clone(state);
   s.credits -= cost.credits;
-  s.smasher.level += 1;
-  return { ok: true, state: s, events: [{ kind: 'smasher_upgraded', level: s.smasher.level }] };
+  s.smashers[index].level += 1;
+  return { ok: true, state: s, events: [{ kind: 'smasher_upgraded', level: s.smashers[index].level }] };
 }
 
 // ---- selling -----------------------------------------------------------------------
@@ -414,7 +417,10 @@ function levelUp(state: GameState, level: number, levels: readonly { cost: { cre
 }
 
 export const nextBeamUpgrade = (s: GameState, index: number) => BEAM.levels[(s.beams[index]?.level ?? 99)]?.cost;
-export const nextSmelterUpgrade = (s: GameState) => SMELTER.levels[s.smelter.level]?.cost;
+export const nextSmelterUpgrade = (s: GameState, index = 0) => {
+  const sm = s.smelters[index];
+  return sm ? SMELTER.levels[sm.level]?.cost : undefined;
+};
 export const nextHandUpgrade = (s: GameState) => HAND.levels[s.handLevel]?.cost;
 
 export function upgradeBeam(state: GameState, index: number): SpendResult {
@@ -423,19 +429,21 @@ export function upgradeBeam(state: GameState, index: number): SpendResult {
   return levelUp(state, beam.level, BEAM.levels, (s) => { s.beams[index].level += 1; }, 'beam');
 }
 
-export function upgradeSmelter(state: GameState): SpendResult {
-  if (!state.smelter.built) return { ok: false, reason: 'need_items' };
-  return levelUp(state, state.smelter.level, SMELTER.levels, (s) => { s.smelter.level += 1; }, 'smelter');
+export function upgradeSmelter(state: GameState, index = 0): SpendResult {
+  const sm = state.smelters[index];
+  if (!sm) return { ok: false, reason: 'need_items' };
+  return levelUp(state, sm.level, SMELTER.levels, (s) => { s.smelters[index].level += 1; }, 'smelter');
 }
 
 export function upgradeHand(state: GameState): SpendResult {
   return levelUp(state, state.handLevel, HAND.levels, (s) => { s.handLevel += 1; }, 'hand');
 }
 
-export function toggleSmelter(state: GameState): Outcome {
-  if (!state.smelter.built) return { state, events: [] };
+export function toggleSmelter(state: GameState, index = 0): Outcome {
+  if (!state.smelters[index]) return { state, events: [] };
   const s = clone(state);
-  s.smelter.on = !s.smelter.on;
-  if (!s.smelter.on) s.smelter.progress = 0;
+  const sm = s.smelters[index];
+  sm.on = !sm.on;
+  if (!sm.on) sm.progress = 0;
   return { state: s, events: [] };
 }

@@ -1,6 +1,7 @@
 import { OFFLINE } from '../data/offline';
 import { canSend, sendToSmasher, tapAllBeams, tick } from './loop';
 import { ITEM_IDS } from './state';
+import { smasherReady } from './units';
 import type { GameState, ItemId } from './types';
 
 export interface OfflineReport {
@@ -51,7 +52,7 @@ function fastForward(start: GameState, effective: number): GameState {
   for (let i = 0; i <= steps; i++) {
     const dt = i < steps ? OFFLINE.stepSec : rest;
     if (dt <= 0) break;
-    if (s.smasher.repaired) {
+    if (smasherReady(s)) {
       if (s.crusher.rock && canSend(s).ok) s = sendToSmasher(s).state;
       s = tapAllBeams(s).state; // fires as many beams as the Bay has room for
     }
@@ -86,7 +87,7 @@ export function applyOffline(state: GameState, nowMs: number): { state: GameStat
       tierSec,
       rocksSmashed: after.stats.smashed - state.stats.smashed,
       items,
-      smasherRusty: !state.smasher.repaired,
+      smasherRusty: !smasherReady(state),
       geodeWaiting: !!after.crusher.rock?.geode,
     },
   };

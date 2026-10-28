@@ -73,7 +73,11 @@ export interface CrusherState {
 }
 
 export interface SmasherState {
-  /** The old Crusher tile starts Rusty (inert) and is repaired once. */
+  /** Module uid of the tile this unit sits on (ship.modules). */
+  uid: number;
+  /** What it cost to get (for the sell refund). The starting Smasher cost nothing. */
+  paid: Cost;
+  /** The starting Smasher begins Rusty (inert) and is repaired once; bought copies arrive repaired. */
   repaired: boolean;
   level: number; // 1..4
   /** Rocks waiting (and the one being smashed, at index 0). HP is the remaining HP. */
@@ -81,7 +85,10 @@ export interface SmasherState {
 }
 
 export interface SmelterState {
-  built: boolean;
+  /** Module uid of the tile this unit sits on (ship.modules). */
+  uid: number;
+  /** What it cost to build (for the sell refund). */
+  paid: Cost;
   level: number; // 1..4
   /** Player switch: when off the Smelter leaves Ore alone. */
   on: boolean;
@@ -112,8 +119,9 @@ export interface GameState {
   bay: Rock[];
   /** The stage (hand-crushing) state. Named crusher for historical reasons. */
   crusher: CrusherState;
-  smasher: SmasherState;
-  smelter: SmelterState;
+  /** One unit per Smasher / Smelter module, in the order they were built. Shared Ore stock, separate levels. */
+  smashers: SmasherState[];
+  smelters: SmelterState[];
   /** Hand Tools level 1..4 (Workshop). */
   handLevel: number;
   stats: Stats;
@@ -133,10 +141,12 @@ export type GameEvent =
   | { kind: 'overheat' }
   | { kind: 'hold_tick' }
   | { kind: 'sent' }
-  | { kind: 'smashed'; ore: number }
+  | { kind: 'smashed'; ore: number; uid?: number }
   | { kind: 'repaired' }
-  | { kind: 'smelted'; plate: number }
+  | { kind: 'smelted'; plate: number; uid?: number }
   | { kind: 'built'; module: ModuleId }
+  | { kind: 'module_sold'; module: ModuleId; credits: number }
+  | { kind: 'module_moved'; module: ModuleId }
   | { kind: 'upgraded'; what: 'beam' | 'smelter' | 'smasher' | 'hand'; level: number }
   | { kind: 'smasher_upgraded'; level: number }
   | { kind: 'crushed'; ore: number; geode: boolean; credits: number; shard: boolean }

@@ -4,6 +4,7 @@ import { SMASHER } from '../data/smasher';
 import { PRICES } from '../data/balance';
 import { nextTileCost } from './hull';
 import { freeCells, freeEdgeCells, moduleCost } from './modules';
+import { needsSmelter, smasherReady } from './units';
 import type { Cost, GameState, ItemId } from './types';
 
 export type StructureGoalId = 'smelter' | 'repair' | 'beam2' | 'expand';
@@ -16,10 +17,10 @@ export function structureGoal(s: GameState): { id: StructureGoalId; cost: Cost }
   const def = HULLS[s.ship.hullId];
   const tile = def ? nextTileCost(def, s.ship.ownedCells.length) : null;
   const expand = tile ? { id: 'expand' as const, cost: tile } : null;
-  if (!s.smelter.built) {
-    return freeCells(s).length > 0 ? { id: 'smelter', cost: MODULES.smelter.cost } : expand;
+  if (needsSmelter(s)) {
+    return freeCells(s).length > 0 ? { id: 'smelter', cost: MODULES.smelter.costs[0] } : expand;
   }
-  if (!s.smasher.repaired) return { id: 'repair', cost: SMASHER.repair };
+  if (!smasherReady(s)) return { id: 'repair', cost: SMASHER.repair };
   if (s.beams.length < 2) {
     const cost = moduleCost(s, 'beam');
     if (cost && freeEdgeCells(s).length > 0) return { id: 'beam2', cost };
@@ -44,7 +45,7 @@ export const reservedQty = (s: GameState, item: ItemId): number => reserved(s)[i
  * Sell cannot starve the Smelter; the Smelter itself is allowed to use it.
  */
 export function smeltFeedReserve(s: GameState): number {
-  if (!s.smelter.built || !s.smelter.on || s.stats.sold < 1) return 0;
+  if (!s.smelters.some((m) => m.on) || s.stats.sold < 1) return 0;
   const need = reservedQty(s, 'plate');
   const short = Math.max(0, need - Math.floor(s.items.plate));
   return short * SMELTER.batchIn;

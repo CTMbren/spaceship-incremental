@@ -26,8 +26,8 @@ Footprints reconciled with the mockup: Crusher and Smelter are 1x1 in hull 1.
 | Module | Foot | Place | Power | Unlock (min) | Cost | Does |
 |---|---|---|---|---|---|---|
 | Tractor Beam | 1x1 | edge | -1 | 0 | free | 4s countdown, small Ore rocks. Levels: Hook, Winch Line, Twin Strand, Gravity Lace |
-| Rock Crusher | 1x1 | any | -1 | 0 | free | Tap, weak-point crits, heat, geodes. Levels: Jaws, Hardened Teeth, Heat Baffles, Jackpot Drum. Scanner effect arrives as its L2 (+30% weak-point window) |
-| Smelter | 1x1 | any | -1 | 3 | 25 Ore | Ore -> Plate (3:1). Levels: Furnace, Draft Flue, Slag Recycler, Blast Chamber |
+| Rock Smasher (Day 7: max 3, copies 500 cr + 8 Plate, 1,200 cr + 20 Plate; Smash feeds the one with most room) / Rock Crusher | 1x1 | any | -1 | 0 | free | Tap, weak-point crits, heat, geodes. Levels: Jaws, Hardened Teeth, Heat Baffles, Jackpot Drum. Scanner effect arrives as its L2 (+30% weak-point window) |
+| Smelter | 1x1 | any | -1 | 3 | 25 Ore (copy 2: 120 cr + 4 Plate, copy 3: 360 cr + 10 Plate) | Ore -> Plate (3:1). Max 3 per ship (Day 7), shared Ore stock, own upgrades, Move free, Sell 75%. Levels: Furnace, Draft Flue, Slag Recycler, Blast Chamber |
 | Solar Wing | 1x1 | edge | +2, reach 2 | 6 | 6 Plate | Power and Boost source |
 | Grapple Beam | 1x2 | edge | -1 | 9 | 10 Plate 8 Ore | 12s countdown, 2x rocks, can carry Ice |
 | Ice Melter | 1x1 | any | -1 | 20 | 12 Plate 6 Ice | Ice -> Coolant (2:1) |

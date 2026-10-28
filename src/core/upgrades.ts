@@ -1,13 +1,13 @@
 import { SMASHER } from '../data/smasher';
 import { canAfford } from './actions';
 import { nextBeamUpgrade, nextHandUpgrade, nextSmasherUpgrade, nextSmelterUpgrade } from './loop';
-import type { GameState } from './types';
+import type { Cost, GameState } from './types';
 
 /** How many Workshop purchases the player can afford right now (drives the dot on the Build tab). */
 export function readyUpgrades(s: GameState): number {
-  const costs = [nextHandUpgrade(s)];
+  const costs: (Cost | undefined)[] = [nextHandUpgrade(s)];
   s.beams.forEach((_, i) => costs.push(nextBeamUpgrade(s, i)));
-  if (s.smelter.built) costs.push(nextSmelterUpgrade(s));
-  costs.push(s.smasher.repaired ? nextSmasherUpgrade(s) : SMASHER.repair);
+  s.smelters.forEach((_, i) => costs.push(nextSmelterUpgrade(s, i)));
+  s.smashers.forEach((m, i) => costs.push(m.repaired ? nextSmasherUpgrade(s, i) : SMASHER.repair));
   return costs.filter((c) => c !== undefined && canAfford(s, c) === 'ok').length;
 }

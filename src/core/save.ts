@@ -1,5 +1,5 @@
 import { SAVE_VERSION, createInitialState } from './state';
-import type { GameState } from './types';
+import type { GameState, Rock } from './types';
 
 const KEY = 'last-tug-save';
 
@@ -7,7 +7,12 @@ export function serialize(state: GameState): string {
   return JSON.stringify(state);
 }
 
-type Loose = Partial<GameState> & { version: number };
+/** Saves older than v7 held one `smasher` and one `smelter` object; they become unit lists in v7. */
+interface LegacyUnits {
+  smasher?: { repaired: boolean; level: number; queue: Rock[] };
+  smelter?: { built: boolean; level: number; on: boolean; progress: number };
+}
+type Loose = Partial<GameState> & LegacyUnits & { version: number };
 
 /** Is this parsed JSON plausibly a save of ours? (Used by Paste save, so a stray text cannot wipe a game.) */
 function looksLikeSave(data: unknown): data is Loose {
@@ -62,7 +67,7 @@ export function parseSave(raw: string | null): { ok: true; state: GameState } | 
         ...cur,
         ship: { ...ship, modules: ship.modules ?? fresh.ship.modules },
         beams: (cur.beams ?? fresh.beams).map((b) => ({ ...b, level: b.level ?? 1 })),
-        smelter: cur.smelter ?? fresh.smelter,
+        smelter: cur.smelter ?? { built: false, level: 1, on: true, progress: 0 },
         handLevel: cur.handLevel ?? fresh.handLevel,
         stats: { ...fresh.stats, ...(cur.stats ?? {}) },
         version: 4,
@@ -76,6 +81,21 @@ export function parseSave(raw: string | null): { ok: true; state: GameState } | 
       // v5 -> v6: the Cargo sheet's "hold materials for my goal" switch (on, as before).
       const fresh = createInitialState();
       cur = { ...cur, flags: { ...fresh.flags, ...(cur.flags ?? {}), holdForGoal: cur.flags?.holdForGoal ?? true }, version: 6 };
+    }
+    if (cur.version < 7) {
+      // v6 -> v7: Smashers and Smelters are lists of units (up to 3 of each), each tied to its module tile.
+      const fresh = createInitialState();
+      const mods = cur.ship?.modules ?? fresh.ship.modules;
+      const { smasher, smelter, ...rest } = cur;
+      const smMod = mods.find((m) => m.defId === 'smasher');
+      const meltMod = mods.find((m) => m.defId === 'smelter');
+      const smashers = smasher
+        ? [{ uid: smMod?.uid ?? 2, paid: { credits: 0 }, repaired: smasher.repaired, level: smasher.level, queue: smasher.queue ?? [] }]
+        : (cur.smashers ?? fresh.smashers);
+      const smelters = smelter?.built && meltMod
+        ? [{ uid: meltMod.uid, paid: { credits: 0, items: { ore: 25 } }, level: smelter.level, on: smelter.on, progress: smelter.progress }]
+        : (cur.smelters ?? []);
+      cur = { ...rest, smashers, smelters, version: 7 };
     }
     return { ok: true, state: { ...createInitialState(), ...cur } as GameState };
   } catch {

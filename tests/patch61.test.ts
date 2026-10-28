@@ -53,9 +53,9 @@ describe('Bay room and Fire', () => {
   });
   it('with Smasher level 2 the Bay feeds the Smasher even with one beam', () => {
     let s = withBeams(1);
-    s = { ...s, smasher: { repaired: true, level: 2, queue: [] }, bay: [dust()], crusher: { ...s.crusher, rock: dust() } };
+    s = { ...s, smashers: [{ uid: 2, paid: { credits: 0 }, repaired: true, level: 2, queue: [] }], bay: [dust()], crusher: { ...s.crusher, rock: dust() } };
     s = tick(tapBeam(s).state, BAL.beamCountdown + 0.1).state;
-    expect(s.smasher.queue.length + s.stats.smashed).toBeGreaterThan(0);
+    expect(s.smashers[0].queue.length + s.stats.smashed).toBeGreaterThan(0);
     expect(s.bay).toHaveLength(1); // the player keeps a rock to tap
   });
   it('rock_arrived says where the rock went', () => {
@@ -68,7 +68,7 @@ describe('Bay room and Fire', () => {
 describe('selling: switch, rows, selected', () => {
   const base = (): GameState => {
     const s = createInitialState();
-    return { ...s, stats: { ...s.stats, sold: 3, rocks: 5, smelted: 4 }, items: { ...s.items, ore: 12, plate: 11, core_shard: 2 } };
+    return { ...s, stats: { ...s.stats, sold: 3, rocks: 5, smelted: 0 }, items: { ...s.items, ore: 12, plate: 11, core_shard: 2 } };
   };
   it('the very first sale sells everything; later sales keep the goal materials', () => {
     const s = base(); // goal: Smelter? (not built) -> reserves 25 Ore
@@ -103,7 +103,7 @@ describe('selling: switch, rows, selected', () => {
     const s = createInitialState();
     expect(sellMode(s)).toBe('quick');
     expect(sellMode({ ...s, items: { ...s.items, ore: 50 } })).toBe('quick');
-    expect(sellMode({ ...s, smelter: { ...s.smelter, built: true } })).toBe('cargo');
+    expect(sellMode({ ...s, smelters: [{ uid: 3, paid: { credits: 0 }, level: 1, on: true, progress: 0 }] })).toBe('cargo');
     expect(sellMode({ ...s, stats: { ...s.stats, smelted: 1 } })).toBe('cargo');
     expect(sellMode({ ...s, items: { ...s.items, plate: 1 } })).toBe('cargo');
   });
@@ -119,12 +119,12 @@ describe('selling: switch, rows, selected', () => {
     expect(released[0]).toMatchObject({ surplus: 12, kept: 0, keptNote: '' });
   });
   it('the Ore row explains smelting once a Smelter exists', () => {
-    const s = { ...base(), smelter: { built: true, level: 1, on: true, progress: 0 } };
+    const s = { ...base(), smelters: [{ uid: 3, paid: { credits: 0 }, level: 1, on: true, progress: 0 }] };
     expect(cargoRows(s)[0].tip).toBe('Smelter: 3 Ore makes 1 Plate worth 8 credits');
   });
   it('rows with the Smasher repair goal show the Plate that is kept', () => {
     const b = base();
-    const s = { ...b, smelter: { built: true, level: 1, on: true, progress: 0 } };
+    const s = { ...b, smelters: [{ uid: 3, paid: { credits: 0 }, level: 1, on: true, progress: 0 }] };
     const plate = cargoRows(s).find((r) => r.item === 'plate')!;
     expect(plate.kept).toBe(8);
     expect(plate.surplus).toBe(3);
@@ -142,7 +142,7 @@ describe('format helpers', () => {
   });
 });
 
-describe('save v5 -> v6 and Paste save', () => {
+describe('save v5 -> v7 and Paste save', () => {
   it('adds holdForGoal = true and is idempotent', () => {
     const v5 = JSON.parse(JSON.stringify(createInitialState())) as Record<string, unknown>;
     v5.version = 5;
@@ -150,7 +150,7 @@ describe('save v5 -> v6 and Paste save', () => {
     const r = parseSave(JSON.stringify(v5));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.state.version).toBe(6);
+    expect(r.state.version).toBe(7);
     expect(r.state.flags).toEqual({ tappedBeam: true, usedHold: false, holdForGoal: true });
     const again = parseSave(serialize(r.state));
     expect(again.ok && again.state).toEqual(r.state);
@@ -184,7 +184,7 @@ describe('menu help and wording', () => {
   it('the Smash goal says Smash', async () => {
     const { currentGoal } = await import('../src/core/goals');
     const base = createInitialState();
-    const s = { ...base, flags: { ...base.flags, tappedBeam: true }, stats: { ...base.stats, rocks: 1, sold: 1, smelted: 1 }, smelter: { ...base.smelter, built: true }, smasher: { ...base.smasher, repaired: true },
+    const s = { ...base, flags: { ...base.flags, tappedBeam: true }, stats: { ...base.stats, rocks: 1, sold: 1, smelted: 1 }, smelters: [{ uid: 3, paid: { credits: 0 }, level: 1, on: true, progress: 0 }], smashers: [{ ...base.smashers[0], repaired: true }],
       ship: { ...base.ship, modules: [...base.ship.modules, { uid: 3, defId: 'smelter' as const, cell: '2,2' }] } };
     expect(currentGoal(s)?.id).toBe('send');
     expect(currentGoal(s)?.text).toMatch(/Smash/);
@@ -197,7 +197,7 @@ describe('goal chip after the tutorial', () => {
     const b = createInitialState();
     const s: GameState = {
       ...b, flags: { ...b.flags, tappedBeam: true }, stats: { ...b.stats, rocks: 1, sold: 1, sent: 1 },
-      smelter: { ...b.smelter, built: true }, smasher: { ...b.smasher, repaired: true },
+      smelters: [{ uid: 3, paid: { credits: 0 }, level: 1, on: true, progress: 0 }], smashers: [{ ...b.smashers[0], repaired: true }],
       beams: [{ status: 'idle', remaining: 0, level: 1 }, { status: 'idle', remaining: 0, level: 1 }],
       ship: { ...b.ship, ownedCells: [...b.ship.ownedCells, '1,1'], modules: [...b.ship.modules, { uid: 3, defId: 'smelter' as const, cell: '2,2' }] },
     };

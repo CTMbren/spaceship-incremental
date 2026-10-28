@@ -7,11 +7,12 @@ import { HULLS } from '../data/hulls';
 import { unlockableCells } from '../core/hull';
 import {
   canSend, handStats, holdCrush, nextBeamUpgrade, nextHandUpgrade, nextSmasherUpgrade, nextSmelterUpgrade,
-  releaseHold, repairSmasher, sellAll, sendToSmasher, tapAllBeams, tick, upgradeBeam, upgradeHand,
+  releaseHold, repairSmasher, sellSelected, sendToSmasher, tapAllBeams, tick, upgradeBeam, upgradeHand,
   upgradeSmasher, upgradeSmelter, weakActive,
 } from '../core/loop';
-import { freeCells, freeEdgeCells, placeModule } from '../core/modules';
-import { sellValue } from '../core/reserve';
+import { freeCells, freeEdgeCells, moduleCost, placeModule } from '../core/modules';
+import { SELLABLE, sellValue } from '../core/reserve';
+import { needsSmelter, smasherReady } from '../core/units';
 import { createInitialState } from '../core/state';
 import type { GameState } from '../core/types';
 import { BAL } from '../data/balance';
@@ -36,6 +37,8 @@ export interface SimResult {
   incomePerMin: number;
 }
 
+/** Tiles the hull can reach today (tile 10 needs Ice, which is not in the game yet). The bot buys copies after this. */
+const HULL_END = 9;
 const DT = 0.1;
 /** How often the policy looks at the screen (seconds) and how often it spends. */
 const LOOK: Record<Policy, number> = { engaged: 0.3, casual: 2.5, idle: 0.3 };
@@ -49,15 +52,15 @@ function spend(s0: GameState): GameState {
   const def = HULLS[s.ship.hullId];
   for (let guard = 0; guard < 20; guard++) {
     // structure first: Smelter, repair, second beam
-    if (!s.smelter.built && freeCells(s).length > 0) {
+    if (needsSmelter(s) && freeCells(s).length > 0) {
       const r = placeModule(s, 'smelter', freeCells(s)[0]);
       if (r.ok) { s = r.state; continue; }
     }
-    if (!s.smasher.repaired) {
+    if (!smasherReady(s)) {
       const r = repairSmasher(s);
       if (r.ok) { s = r.state; continue; }
     }
-    if (s.beams.length < 2 && s.smasher.repaired) {
+    if (s.beams.length < 2 && smasherReady(s)) {
       const edge = freeEdgeCells(s);
       if (edge.length) {
         const r = placeModule(s, 'beam', edge[0]);
@@ -70,6 +73,17 @@ function spend(s0: GameState): GameState {
       const r = buyTile(s, next);
       if (r.ok) { s = r.state; continue; }
     }
+    // production copies on spare tiles: a 2nd/3rd Smelter once Ore piles up, Smashers whenever affordable
+    if (s.ship.ownedCells.length >= HULL_END && s.beams.length >= 2 && freeCells(s).length > 0) {
+      if (s.smelters.length < 3 && s.items.ore >= 40) {
+        const r = placeModule(s, 'smelter', freeCells(s)[0]);
+        if (r.ok) { s = r.state; continue; }
+      }
+      if (s.smashers.length < 3 && smasherReady(s)) {
+        const r = placeModule(s, 'smasher', freeCells(s)[0]);
+        if (r.ok) { s = r.state; continue; }
+      }
+    }
     // otherwise the cheapest affordable upgrade
     const options: { cost: number; run: () => ReturnType<typeof upgradeHand> }[] = [];
     const add = (cost: { credits: number } | undefined, run: () => ReturnType<typeof upgradeHand>) => {
@@ -77,8 +91,8 @@ function spend(s0: GameState): GameState {
     };
     add(nextHandUpgrade(s), () => upgradeHand(s));
     s.beams.forEach((_, i) => add(nextBeamUpgrade(s, i), () => upgradeBeam(s, i)));
-    if (s.smelter.built) add(nextSmelterUpgrade(s), () => upgradeSmelter(s));
-    if (s.smasher.repaired) add(nextSmasherUpgrade(s), () => upgradeSmasher(s));
+    s.smelters.forEach((_, i) => add(nextSmelterUpgrade(s, i), () => upgradeSmelter(s, i)));
+    s.smashers.forEach((m, i) => { if (m.repaired) add(nextSmasherUpgrade(s, i), () => upgradeSmasher(s, i)); });
     options.sort((a, b) => a.cost - b.cost);
     // keep saving for a tile if the cheapest upgrade would cost more than a fifth of the next tile's credits
     const tileCredits = next ? (HULLS[s.ship.hullId].tileCosts[s.ship.ownedCells.length - 3]?.credits ?? 0) : 0;
@@ -98,7 +112,7 @@ function look(s0: GameState, policy: Policy, dt: number): GameState {
   const rock = s.crusher.rock;
   if (!rock) return s;
   const hand = handStats(s);
-  const useSmasher = policy !== 'engaged' && s.smasher.repaired && canSend(s).ok;
+  const useSmasher = policy !== 'engaged' && smasherReady(s) && canSend(s).ok;
   if (useSmasher) return sendToSmasher(s).state;
   // hold the rock; back off when hot
   const heat = s.crusher.heat;
@@ -129,16 +143,20 @@ export function runSim(policy: Policy, minutes: number, seed = 1): SimResult {
     }
     if (present && sinceSpend >= SPEND[policy]) {
       sinceSpend = 0;
-      if (sellValue(s) > 0) {
-        const o = sellAll(s);
+      // while saving Plate for the next Smasher copy the bot keeps its Plate and the Ore the Smelter turns into it
+      const need = moduleCost(s, 'smasher')?.items?.plate ?? 0;
+      const saving = s.ship.ownedCells.length >= HULL_END && s.beams.length >= 2 && smasherReady(s) && s.smashers.length < 3 && freeCells(s).length > 0;
+      const sellItems = SELLABLE.filter((i) => !(saving && (i === 'plate' || (i === 'ore' && s.items.plate < need)))); // Ore feeds the Smelter
+      if (sellValue(s, sellItems) > 0) {
+        const o = sellSelected(s, sellItems);
         if (t > end - 300) sold5 += o.state.credits - s.credits;
         s = o.state;
       }
       s = spend(s);
     }
     void before;
-    if (ms.smelter === undefined && s.smelter.built) ms.smelter = t;
-    if (ms.repaired === undefined && s.smasher.repaired) ms.repaired = t;
+    if (ms.smelter === undefined && s.smelters.length > 0) ms.smelter = t;
+    if (ms.repaired === undefined && smasherReady(s)) ms.repaired = t;
     if (ms.beam2 === undefined && s.beams.length >= 2) ms.beam2 = t;
     const n = s.ship.ownedCells.length;
     if (ms.tiles[n] === undefined) ms.tiles[n] = t;

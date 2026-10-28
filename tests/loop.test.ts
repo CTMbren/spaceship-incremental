@@ -176,9 +176,9 @@ describe('sell and goals', () => {
     expect(currentGoal(s)?.id).toBe('sell');
     s = { ...s, stats: { ...s.stats, sold: 1 } };
     expect(currentGoal(s)?.id).toBe('smelter');
-    s = { ...s, smelter: { ...s.smelter, built: true }, ship: { ...s.ship, modules: [...s.ship.modules, { uid: 3, defId: 'smelter' as const, cell: '2,2' }] } };
+    s = { ...s, smelters: [{ uid: 3, paid: { credits: 0 }, level: 1, on: true, progress: 0 }], ship: { ...s.ship, modules: [...s.ship.modules, { uid: 3, defId: 'smelter' as const, cell: '2,2' }] } };
     expect(currentGoal(s)?.id).toBe('repair');
-    s = { ...s, smasher: { ...s.smasher, repaired: true } };
+    s = { ...s, smashers: [{ ...s.smashers[0], repaired: true }] };
     expect(currentGoal(s)?.id).toBe('send');
     s = { ...s, stats: { ...s.stats, sent: 1 } };
     expect(currentGoal(s)?.id).toBe('expand'); // no free tile for a beam yet (beam, Smasher, Smelter fill the start)
@@ -190,25 +190,25 @@ describe('sell and goals', () => {
 });
 
 describe('save migration', () => {
-  it('upgrades a v1 save through to v6 and keeps credits, items and hull', () => {
+  it('upgrades a v1 save through to v7 and keeps credits, items and hull', () => {
     const v1 = JSON.stringify({
       version: 1, credits: 321, items: { ore: 5 },
       ship: { hullId: 'tug', ownedCells: ['2,0', '2,1', '2,2', '1,2'] },
     });
     const s = deserialize(v1);
-    expect(s.version).toBe(6);
+    expect(s.version).toBe(7);
     expect(s.credits).toBe(321);
     expect(s.items.ore).toBe(5);
     expect(s.items.ice).toBe(0);
     expect(s.ship.ownedCells).toHaveLength(4);
     expect(s.beams).toHaveLength(1);
-    expect(s.smasher.repaired).toBe(false);
+    expect(s.smashers[0].repaired).toBe(false);
   });
   it('v2 -> v3: new players get a Rusty Smasher, experienced ones keep a working one', () => {
     const base = createInitialState();
     const mk = (rocks: number) => JSON.stringify({ ...base, version: 2, stats: { rocks, geodes: 0, sold: 0, taps: 0 }, smasher: undefined });
-    expect(deserialize(mk(2)).smasher).toEqual({ repaired: false, level: 1, queue: [] });
-    expect(deserialize(mk(25)).smasher.repaired).toBe(true);
+    expect(deserialize(mk(2)).smashers).toEqual([{ uid: 2, paid: { credits: 0 }, repaired: false, level: 1, queue: [] }]);
+    expect(deserialize(mk(25)).smashers[0].repaired).toBe(true);
     expect(deserialize(mk(2)).stats.holdTicks).toBe(0);
   });
   it('migrating twice gives the same result (idempotent)', () => {

@@ -8,7 +8,7 @@ export type SellMode = 'quick' | 'cargo';
 
 /** The Cargo sheet takes over once a second thing to sell is coming: the Smelter is built, or Plate already exists. */
 export const sellMode = (s: GameState): SellMode =>
-  s.smelter.built || s.stats.smelted > 0 || SELLABLE.some((k) => k !== 'ore' && s.items[k] > 0) ? 'cargo' : 'quick';
+  s.smelters.length > 0 || s.stats.smelted > 0 || SELLABLE.some((k) => k !== 'ore' && s.items[k] > 0) ? 'cargo' : 'quick';
 
 const GOAL_LABEL: Record<StructureGoalId, string> = {
   smelter: 'the Smelter',
@@ -53,7 +53,7 @@ export function cargoRows(s: GameState): CargoRow[] {
     if (direct > 0 && feed > 0) keptNote = `Kept ${direct} for ${why}, ${feed} to make Plate`;
     else if (direct > 0) keptNote = `Kept ${direct} for ${why}`;
     else if (feed > 0) keptNote = `Kept ${feed} to make Plate for ${why}`;
-    const tip = item === 'ore' && s.smelter.built && count > 0
+    const tip = item === 'ore' && s.smelters.length > 0 && count > 0
       ? `Smelter: ${SMELTER.batchIn} Ore makes ${SMELTER.batchOut} Plate worth ${SMELTER.batchOut * PRICES.plate} credits`
       : '';
     rows.push({ item, count, price: PRICES[item], surplus, kept, keptNote, forSale: true, tip });

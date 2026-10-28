@@ -12,14 +12,33 @@ export const MODULES = {
       { credits: 140, items: { plate: 6 } },
     ] as Cost[],
   },
+  /**
+   * Smelter copies: #1 is the tutorial price; #2 and #3 follow about x3 (Brendan: "120, 360, 1000").
+   * The list length is the cap per ship.
+   */
   smelter: {
     name: 'Smelter',
     placement: 'any' as const,
-    max: 1,
-    cost: { credits: 0, items: { ore: 25 } } as Cost,
+    costs: [
+      { credits: 0, items: { ore: 25 } },
+      { credits: 120, items: { plate: 4 } },
+      { credits: 360, items: { plate: 10 } },
+    ] as Cost[],
   },
-  smasher: { name: 'Rock Smasher', placement: 'any' as const, max: 1 },
+  /** Smasher copies: #1 comes with the ship (it starts Rusty); bought copies arrive repaired. */
+  smasher: {
+    name: 'Rock Smasher',
+    placement: 'any' as const,
+    costs: [
+      { credits: 0 },
+      { credits: 500, items: { plate: 8 } },
+      { credits: 1200, items: { plate: 20 } },
+    ] as Cost[],
+  },
 } as const;
+
+/** Share of a module's price (and its upgrade credits) paid back when it is sold. */
+export const SELL_REFUND = 0.75;
 
 /** Tractor Beam levels: each level makes every rock from that beam richer. Cost base 25, x1 x3 x9. */
 export const BEAM = {

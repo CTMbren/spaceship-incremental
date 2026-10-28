@@ -24,7 +24,7 @@ const smelterState = (over: Partial<GameState> = {}): GameState => {
   const s = createInitialState();
   return {
     ...s,
-    smelter: { built: true, level: 1, on: true, progress: 0 },
+    smelters: [{ uid: 3, paid: { credits: 0 }, level: 1, on: true, progress: 0 }],
     stats: { ...s.stats, sold: 1 },
     ...over,
   };
@@ -37,7 +37,7 @@ describe('module placement', () => {
     expect(s.ship.modules.map((m) => `${m.defId}@${m.cell}`)).toEqual(['beam@2,0', 'smasher@2,1']);
     expect(freeCells(s)).toEqual(['2,2']);
   });
-  it('the Smelter costs 25 Ore, goes on a free tile, and only one can exist', () => {
+  it('the Smelter costs 25 Ore, goes on a free tile, and the next copy costs more', () => {
     const s = createInitialState();
     expect(placeModule(s, 'smelter', '2,2')).toEqual({ ok: false, reason: 'need_items' });
     const rich = withItems(s, { ore: 30 });
@@ -45,12 +45,12 @@ describe('module placement', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.state.items.ore).toBe(5);
-    expect(r.state.smelter.built).toBe(true);
-    expect(rich.smelter.built).toBe(false); // input untouched
+    expect(r.state.smelters).toHaveLength(1);
+    expect(rich.smelters).toHaveLength(0); // input untouched
     const again = withItems(r.state, { ore: 30 }, 0);
     expect(placeModule(again, 'smelter', '2,2')).toEqual({ ok: false, reason: 'occupied' });
     expect(placeModule({ ...again, ship: { ...again.ship, ownedCells: [...again.ship.ownedCells, '1,1'] } }, 'smelter', '1,1'))
-      .toEqual({ ok: false, reason: 'at_limit' });
+      .toEqual({ ok: false, reason: 'need_credits' }); // the second Smelter is a bought copy (120 credits + 4 Plate)
   });
   it('rejects tiles that are occupied or not owned', () => {
     const s = withItems(createInitialState(), { ore: 30 });
@@ -101,11 +101,11 @@ describe('Smelter', () => {
     const small = run(s, 60, 0.05);
     expect(big.items.plate).toBe(small.items.plate);
     expect(big.items.ore).toBe(small.items.ore);
-    expect(big.smelter.progress).toBeCloseTo(small.smelter.progress, 6);
+    expect(big.smelters[0].progress).toBeCloseTo(small.smelters[0].progress, 6);
   });
   it('never touches Ore reserved for the current goal', () => {
     // Smelter built, Smasher unrepaired: the goal needs Plate, so Ore is free. After repair, tile 4 needs 4 Ore.
-    const base = smelterState({ smasher: { repaired: true, level: 1, queue: [] }, stats: { ...createInitialState().stats, sold: 1, sent: 1 } });
+    const base = smelterState({ smashers: [{ uid: 2, paid: { credits: 0 }, repaired: true, level: 1, queue: [] }], stats: { ...createInitialState().stats, sold: 1, sent: 1 } });
     const s = { ...base, beams: [...base.beams, { status: 'idle' as const, remaining: 0, level: 1 }], items: { ...base.items, ore: 10 } };
     expect(structureGoal(s)?.id).toBe('expand');
     expect(reserved(s).ore).toBe(4);
@@ -117,11 +117,11 @@ describe('Smelter', () => {
   it('stops when switched off and when starved, and keeps no half batch', () => {
     const s = smelterState({ items: { ...createInitialState().items, ore: 12 } });
     const off = toggleSmelter(s).state;
-    expect(off.smelter.on).toBe(false);
+    expect(off.smelters[0].on).toBe(false);
     expect(run(off, 30).items.plate).toBe(0);
     const starved = run({ ...s, items: { ...s.items, ore: 2 } }, 30);
     expect(starved.items.plate).toBe(0);
-    expect(starved.smelter.progress).toBe(0);
+    expect(starved.smelters[0].progress).toBe(0);
   });
   it('levels are 25% faster each and cost 40 / 120 / 360 credits', () => {
     for (let i = 1; i < SMELTER.levels.length; i++) {
@@ -133,7 +133,7 @@ describe('Smelter', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     s = r.state;
-    expect(s.smelter.level).toBe(2);
+    expect(s.smelters[0].level).toBe(2);
     expect(s.credits).toBe(0);
     expect(upgradeSmelter(s)).toEqual({ ok: false, reason: 'need_credits' });
     const fast = run({ ...s, items: { ...s.items, ore: 30 } }, 4.85);
@@ -278,7 +278,7 @@ describe('selling and reserved materials', () => {
   });
 });
 
-describe('save v3 -> v6', () => {
+describe('save v3 -> v7', () => {
   it('adds modules, smelter, hand level, beam levels and keeps progress; idempotent', () => {
     const v3 = createInitialState() as unknown as Record<string, unknown>;
     const old = {
@@ -286,19 +286,19 @@ describe('save v3 -> v6', () => {
       ship: { hullId: 'tug', ownedCells: ['2,0', '2,1', '2,2', '1,1'] },
       beams: [{ status: 'idle', remaining: 0 }],
       smelter: undefined, handLevel: undefined, stats: { rocks: 12, geodes: 1, sold: 20, taps: 50, holdTicks: 3, sent: 2, smashed: 1, overheats: 0 },
-      smasher: { repaired: true, level: 2, queue: [] },
+      smashers: [{ uid: 2, paid: { credits: 0 }, repaired: true, level: 2, queue: [] }],
     };
     const s = deserialize(JSON.stringify(old));
-    expect(s.version).toBe(6);
+    expect(s.version).toBe(7);
     expect(s.credits).toBe(777);
     expect(s.ship.modules.map((m) => m.defId)).toEqual(['beam', 'smasher']);
     expect(s.ship.ownedCells).toHaveLength(4);
     expect(s.beams[0].level).toBe(1);
-    expect(s.smelter).toEqual({ built: false, level: 1, on: true, progress: 0 });
+    expect(s.smelters).toEqual([]);
     expect(s.handLevel).toBe(1);
     expect(s.stats.smelted).toBe(0);
     expect(s.stats.rocks).toBe(12);
-    expect(s.smasher).toEqual({ repaired: true, level: 2, queue: [] });
+    expect(s.smashers).toEqual([{ uid: 2, paid: { credits: 0 }, repaired: true, level: 2, queue: [] }]);
     expect(deserialize(JSON.stringify(s))).toEqual(s);
   });
 });

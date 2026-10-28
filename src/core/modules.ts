@@ -26,9 +26,7 @@ export const moduleCount = (s: GameState, id: ModuleId): number => s.ship.module
 
 /** Cost to build the next copy of a module, or null if none can be built (at its limit). */
 export function moduleCost(s: GameState, id: ModuleId): Cost | null {
-  if (id === 'beam') return MODULES.beam.costs[moduleCount(s, 'beam')] ?? null;
-  if (id === 'smelter') return moduleCount(s, 'smelter') >= MODULES.smelter.max ? null : MODULES.smelter.cost;
-  return null; // the Smasher comes with the ship (it starts Rusty)
+  return MODULES[id].costs[moduleCount(s, id)] ?? null;
 }
 
 export type PlaceResult =
@@ -57,6 +55,7 @@ export function placeModule(state: GameState, id: ModuleId, cell: string): Place
   const uid = Math.max(0, ...s.ship.modules.map((m) => m.uid)) + 1;
   s.ship.modules.push({ uid, defId: id, cell });
   if (id === 'beam') s.beams.push({ status: 'idle', remaining: 0, level: 1 });
-  if (id === 'smelter') s.smelter = { built: true, level: 1, on: true, progress: 0 };
+  if (id === 'smelter') s.smelters.push({ uid, paid: cost, level: 1, on: true, progress: 0 });
+  if (id === 'smasher') s.smashers.push({ uid, paid: cost, repaired: true, level: 1, queue: [] }); // bought copies need no repair
   return { ok: true, state: s, events: [{ kind: 'built', module: id }] };
 }

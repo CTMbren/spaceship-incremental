@@ -4,6 +4,7 @@ import { HULLS } from '../data/hulls';
 import { nextTileCost } from './hull';
 import { freeCells, freeEdgeCells, moduleCost } from './modules';
 import { structureGoal } from './reserve';
+import { needsSmelter, smasherReady } from './units';
 import type { Cost, GameState } from './types';
 
 export interface Goal {
@@ -29,11 +30,11 @@ export function currentGoal(s: GameState): Goal | null {
   if (s.stats.rocks < 1) return { id: 'crush', text: 'Crush the rock' };
   if (s.stats.sold < 1) return { id: 'sell', text: 'Sell your Ore' };
   const sg = structureGoal(s);
-  if (!s.smelter.built) {
-    if (sg?.id === 'smelter') return { id: 'smelter', text: `Build a Smelter · ${costText(MODULES.smelter.cost)}` };
+  if (needsSmelter(s)) {
+    if (sg?.id === 'smelter') return { id: 'smelter', text: `Build a Smelter · ${costText(MODULES.smelter.costs[0])}` };
     return sg ? { id: 'expand', text: `Expand hull · ${costText(sg.cost)}` } : null;
   }
-  if (!s.smasher.repaired) return { id: 'repair', text: `Fix the rusty Smasher · ${costText(SMASHER.repair)}` };
+  if (!smasherReady(s)) return { id: 'repair', text: `Fix the rusty Smasher · ${costText(SMASHER.repair)}` };
   if (s.stats.sent < 1) return { id: 'send', text: 'Smash a rock: tap Smash' };
   if (s.beams.length < 2) {
     if (sg?.id === 'beam2') return { id: 'beam2', text: `Add a second beam · ${costText(sg.cost)}` };

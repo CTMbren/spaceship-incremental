@@ -9,7 +9,7 @@ const H = 3600;
 const T0 = 1_800_000_000_000;
 const repaired = (): GameState => {
   const s = createInitialState();
-  return stamp({ ...s, smasher: { ...s.smasher, repaired: true } }, T0);
+  return stamp({ ...s, smashers: [{ ...s.smashers[0], repaired: true }] }, T0);
 };
 const later = (s: GameState, sec: number) => applyOffline(s, T0 + sec * 1000);
 const geode: Rock = { kind: 'dust', geode: true, hp: 53, maxHp: 53, ore: 4 };
@@ -63,7 +63,7 @@ describe('applyOffline', () => {
 
   it('the Smelter turns held Ore into Plate even with a rusty Smasher', () => {
     const base = stamp(createInitialState(), T0);
-    const s: GameState = { ...base, smelter: { built: true, level: 1, on: true, progress: 0 }, items: { ...base.items, ore: 300 }, stats: { ...base.stats, sold: 3 } };
+    const s: GameState = { ...base, smelters: [{ uid: 3, paid: { credits: 0 }, level: 1, on: true, progress: 0 }], items: { ...base.items, ore: 300 }, stats: { ...base.stats, sold: 3 } };
     const { state, report } = later(s, 1 * H);
     expect(state.items.plate).toBe(100);
     expect(state.items.ore).toBe(0);
@@ -102,17 +102,17 @@ describe('applyOffline', () => {
   it('more Smasher levels earn more away', () => {
     const l1 = later(repaired(), 2 * H).report!.rocksSmashed;
     const s = repaired();
-    const l4 = later({ ...s, smasher: { ...s.smasher, level: 4 } }, 2 * H).report!.rocksSmashed;
+    const l4 = later({ ...s, smashers: [{ ...s.smashers[0], level: 4 }] }, 2 * H).report!.rocksSmashed;
     expect(l4).toBeGreaterThan(l1 * 1.8);
   });
 });
 
-describe('save v4 -> v6', () => {
+describe('save v4 -> v7', () => {
   it('adds savedAt = 0 so an old save earns no offline time, and round-trips', () => {
     const v4 = { ...createInitialState(), version: 4, savedAt: undefined } as unknown as Record<string, unknown>;
     delete v4.savedAt;
     const s = deserialize(JSON.stringify(v4));
-    expect(s.version).toBe(6);
+    expect(s.version).toBe(7);
     expect(s.savedAt).toBe(0);
     expect(deserialize(serialize(s))).toEqual(s);
     expect(deserialize(serialize(stamp(s, T0))).savedAt).toBe(T0);
