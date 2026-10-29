@@ -8,7 +8,7 @@ import {
   toggleSmelter, upgradeBeam, upgradeHand, upgradeModule, upgradeSmasher, upgradeSmelter, weakActive, winchedBeams,
 } from '../core/loop';
 import { fitsPlacement, freeCells, freeCellsFor, moduleCost, moduleCount, moduleUnlocked, placeModule, placementOf } from '../core/modules';
-import { evaluatePower, solarLevel, type PowerInfo } from '../core/power';
+import { evaluatePower, moduleDraw, solarLevel, type PowerInfo } from '../core/power';
 import {
   canDepart, currentNode, depart, engineLevel, engineSpeed, etaSec, inTransit, legLength, nextLegSec, ROUTE,
 } from '../core/travel';
@@ -29,7 +29,11 @@ import { HAND } from '../data/hand';
 import { HELP } from '../data/help';
 import { SMASHER } from '../data/smasher';
 import { HULLS } from '../data/hulls';
-import { drawHullExterior, GOLD_TRIM } from './hullArt';
+import { drawHullExterior, GOLD_TRIM, type ExteriorInfo } from './hullArt';
+import { drawExteriorFx, type ThrustState } from './art/exterior';
+import { ART_LABEL, drawBody, drawFx, type ArtKind } from './art/modules';
+import type { Dir } from './art/kit';
+import { exposedSides } from '../core/hull';
 import {
   baySize, canDeliver, canSkip, deliverJob, finishableJobs, JOB_ITEMS, rank, repToNext, skipJob, slotKinds, stillNeeds,
 } from '../core/jobs';
@@ -71,10 +75,6 @@ const SELL = { x: 16 + FIRE.w + 12, w: CW - FIRE.w - 12 };
 /** The Smash button sits at the right end of the stage. */
 const SMASH = { x: STAGE.x + STAGE.w - 84, w: 76, h: 56 };
 
-const SMELTER_COLOR = 0xb4552f;
-const SOLAR_COLOR = 0x2b5fa8;
-const ENGINE_COLOR = 0x5a4a8a;
-const GRAPPLE_COLOR = 0x167a72;
 /** Rock colours by kind: [outer, inner]. Geodes are purple whatever the kind. */
 const ROCK_LOOK: Record<Rock['kind'], { outer: number; inner: number; bay: number }> = {
   dust: { outer: 0x8a7f78, inner: 0xa59a92, bay: 0xa9937c },
@@ -116,6 +116,11 @@ type SheetRow =
 export class ShipScene extends Phaser.Scene {
   private state!: GameState;
   private layer!: Phaser.GameObjects.Container;
+  /** Buy tiles (their price colour follows the credits, so they are not part of the baked hull image). */
+  private ghostLayer!: Phaser.GameObjects.Container;
+  /** The baked hull image is only repainted when this signature (or the zoom it was baked at) changes. */
+  private hullSig = '';
+  private hullRes = 0;
   private hud!: Phaser.GameObjects.Container;
   private toast?: Phaser.GameObjects.Text;
   private debug = new URLSearchParams(window.location.search).has('debug');
@@ -133,6 +138,14 @@ export class ShipScene extends Phaser.Scene {
   private stars: { x: number; y: number; r: number; a: number; z: number }[] = [];
   private starShift = 0;
   private mapTimer = 0;
+  private fpsText?: Phaser.GameObjects.Text;
+  /** Graphics pass: exterior anchors (lights, thrusters), event flash times by module uid, view options. */
+  private exterior: ExteriorInfo | null = null;
+  private flashAt = new Map<number, number>();
+  private calm = false;
+  private labels: 'auto' | 'on' | 'off' = 'auto';
+  private bgG!: Phaser.GameObjects.Graphics;
+  private bgKey = '';
   /** Current ship zoom (pinch) and the touch gesture in progress on the ship view. */
   private zoom = ZOOM;
   private swiped = false;
@@ -175,7 +188,8 @@ export class ShipScene extends Phaser.Scene {
     this.ship = this.add.container(0, 0).setScale(this.zoom);
     this.layer = this.add.container(0, 0);
     this.dynShip = this.add.graphics();
-    this.ship.add([this.layer, this.dynShip]);
+    this.ghostLayer = this.add.container(0, 0);
+    this.ship.add([this.layer, this.ghostLayer, this.dynShip]);
     const clip = this.make.graphics({ x: 0, y: 0 }, false);
     clip.fillStyle(0xffffff, 1).fillRect(VIEW.x, VIEW.y, VIEW.w, VIEW.h);
     this.ship.setMask(clip.createGeometryMask());
@@ -220,6 +234,10 @@ export class ShipScene extends Phaser.Scene {
     }
     this.drawStars(dt);
     this.drawDynamic();
+    if (this.debug) {
+      this.fpsText ??= this.txt(W - 8, H - 96, '', { fontFamily: FONT, fontSize: '12px', color: T.coral }).setOrigin(1, 1).setDepth(50);
+      if (Math.floor(this.elapsed * 2) !== Math.floor((this.elapsed - dt) * 2)) this.fpsText.setText(`${Math.round(this.game.loop.actualFps)} fps`);
+    }
   }
 
   /** Static layer (HUD numbers, goal chip) only needs a rebuild when Ore or credits change. */
@@ -355,7 +373,7 @@ export class ShipScene extends Phaser.Scene {
   // ---- drawing -----------------------------------------------------------
   private redraw(): void {
     this.tileActions.clear();
-    this.layer.removeAll(true);
+    this.ghostLayer.removeAll(true);
     this.hud.removeAll(true);
     this.updateLimits(false);
     this.drawHull();
@@ -411,14 +429,18 @@ export class ShipScene extends Phaser.Scene {
   // ---- ship view gestures: swipe to scroll, pinch to zoom, tap a tile, double-tap to reset ----------
   private loadView(): void {
     try {
-      const v = JSON.parse(localStorage.getItem(VIEW_KEY) ?? '{}') as { zoom?: number; swiped?: boolean };
+      const v = JSON.parse(localStorage.getItem(VIEW_KEY) ?? '{}') as { zoom?: number; swiped?: boolean; calm?: boolean; labels?: string };
       if (typeof v.zoom === 'number' && Number.isFinite(v.zoom)) this.zoom = v.zoom;
       this.swiped = !!v.swiped;
+      this.calm = !!v.calm || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true && v.calm !== false;
+      if (v.labels === 'on' || v.labels === 'off') this.labels = v.labels;
     } catch { /* blocked storage: defaults */ }
   }
 
   private saveView(): void {
-    try { localStorage.setItem(VIEW_KEY, JSON.stringify({ zoom: this.zoom, swiped: this.swiped })); } catch { /* ignore */ }
+    try {
+      localStorage.setItem(VIEW_KEY, JSON.stringify({ zoom: this.zoom, swiped: this.swiped, calm: this.calm, ...(this.labels !== 'auto' ? { labels: this.labels } : {}) }));
+    } catch { /* ignore */ }
   }
 
   /** Zoom to z, keeping the point under `anchor` (screen) where it is, within the pan limits. */
@@ -440,6 +462,7 @@ export class ShipScene extends Phaser.Scene {
     this.limits = panLimits(b, this.zoom);
     this.panGoal = { x: (this.limits.minX + this.limits.maxX) / 2, y: (this.limits.minY + this.limits.maxY) / 2 };
     this.saveView();
+    this.redraw();
   }
 
   private setupGestures(): void {
@@ -491,6 +514,7 @@ export class ShipScene extends Phaser.Scene {
         }
         g.pinch = null;
         this.saveView();
+        this.redraw(); // re-bake the hull image sharp at the new zoom
         return;
       }
       if (g.pts.size > 0) return;
@@ -576,15 +600,44 @@ export class ShipScene extends Phaser.Scene {
   }
 
   /** Ship exterior (silhouette, nose, fins, engines) plus the module placeholders on the start tiles. */
+  /** What the baked hull image depends on: tiles, modules and their looks, power, labels, trim. */
+  private hullSignature(power: PowerInfo): string {
+    const st = this.state;
+    const mods = st.ship.modules.map((m) => {
+      const a = this.artFor(m.uid);
+      return `${m.uid}:${m.cell}:${a?.kind}:${a?.level}:${a?.dir}:${a?.rusty ? 1 : 0}:${power.powered.has(m.uid) ? 1 : 0}`;
+    });
+    return [st.ship.ownedCells.join(';'), this.ghostCells().map(cellKey).join(';'), mods.join(';'), this.labelsOn() ? 1 : 0, rank(st) >= RANK.partner ? 1 : 0].join('|');
+  }
+
+  /** Pixel density to bake the hull at: the screen's, at the current zoom (capped for very big ships). */
+  private bakeRes(w: number, h: number): number {
+    return Math.max(0.5, Math.min(DPR * this.zoom, 4096 / w, 4096 / h, Math.sqrt(9e6 / (w * h))));
+  }
+
   private drawHull(): void {
     const ownedKeys = this.state.ship.ownedCells;
     const owned = ownedKeys.map(parseKey);
+    const sig = this.hullSignature(evaluatePower(this.state));
+    const bounds = boundsOf(owned, this.ghostCells());
+    const BP = 36; // room for fins, flames' roots and lights around the hull bounds
+    const bx = bounds.x0 - BP, by = bounds.y0 - BP, bw = bounds.x1 - bounds.x0 + 2 * BP, bh = bounds.y1 - bounds.y0 + 2 * BP;
+    const res = this.bakeRes(bw, bh);
+    const paint = sig !== this.hullSig || Math.abs(res - this.hullRes) > 0.01;
+    if (paint) {
+      this.hullSig = sig;
+      this.hullRes = res;
+      this.layer.removeAll(true);
+    }
     const g = this.add.graphics();
-    this.layer.add(g);
+    if (paint) this.layer.add(g);
     const finished = new Set(HULLS[this.state.ship.hullId].template.map((c) => `${toScreen(c).col},${toScreen(c).row}`));
     const trim = rank(this.state) >= RANK.partner ? GOLD_TRIM : undefined;
-    drawHullExterior(g, owned, finished, new Set(this.ghostCells().map((c) => `${toScreen(c).col},${toScreen(c).row}`)), trim);
-    for (const c of owned) {
+    if (paint) this.exterior = drawHullExterior(g, owned, finished, new Set(this.ghostCells().map((c) => `${toScreen(c).col},${toScreen(c).row}`)), trim);
+    if (paint && this.exterior?.decal) {
+      this.layer.add(this.shipTxt(this.exterior.decal.x, this.exterior.decal.y, 'LT-01', { fontFamily: FONT, fontSize: '8px', fontStyle: '600', color: '#1E2640' }).setOrigin(0.5));
+    }
+    for (const c of paint ? owned : []) {
       const { x, y } = this.px(c);
       g.fillStyle(C.deck, 1).fillRoundedRect(x + 2, y + 2, TILE - 4, TILE - 4, 8);
       g.lineStyle(2, C.deckEdge, 1).strokeRoundedRect(x + 2, y + 2, TILE - 4, TILE - 4, 8);
@@ -594,72 +647,93 @@ export class ShipScene extends Phaser.Scene {
     const mods = this.state.ship.modules;
     const byCell = new Map(mods.map((m) => [m.cell, m]));
     const beamIndex = (uid: number) => this.state.beams.findIndex((b) => b.uid === uid);
+    const power = evaluatePower(this.state);
+    const showLabels = this.labelsOn();
     // taps are resolved by the ship-view gesture handler (tap vs swipe vs pinch), cell by cell
     const hitZone = (c: Cell, fn: () => void) => { this.tileActions.set(cellKey(c), fn); };
     for (const c of owned) {
       const key = cellKey(c);
       const m = byCell.get(key);
       const moving = this.moveUid !== null;
+      const { x, y } = this.px(c);
       if (!m) {
-        this.placeholder(owned, c, 0x18223f, 'Open', true);
+        if (paint) {
+          drawBody(g, 'open', x, y, { level: 1, dir: 'up' });
+          g.lineStyle(2, C.beam, 0.9).strokeRoundedRect(x + 7, y + 7, TILE - 14, TILE - 14, 8);
+          this.layer.add(this.shipTxt(x + TILE / 2, y + TILE / 2, 'Open', { fontFamily: FONT, fontSize: '12px', color: T.text }).setOrigin(0.5));
+        }
         hitZone(c, () => (moving ? this.dropModule(key) : this.showBuildSheet(key)));
-      } else if (m.defId === 'beam' || m.defId === 'grapple') {
-        const grapple = m.defId === 'grapple';
-        this.placeholder(owned, c, grapple ? GRAPPLE_COLOR : C.beamDeep, '');
-        if (grapple) this.grappleGlyph(c);
+        continue;
+      }
+      const art = paint ? this.artFor(m.uid) : null;
+      if (art) {
+        drawBody(g, art.kind, x, y, { level: art.level, dir: art.dir, rusty: art.rusty, dark: art.draws && !power.powered.has(m.uid) });
+        if (art.level >= 2) {
+          this.layer.add(this.shipTxt(x + 12.5, y + 12.5, String(art.level), { fontFamily: FONT, fontSize: '8px', fontStyle: '600', color: '#0B1020', backgroundColor: '#E6ECFF', padding: { x: 1.5, y: 0 } }).setOrigin(0.5));
+        }
+        if (showLabels) {
+          this.layer.add(this.shipTxt(x + TILE / 2, y + TILE - 9, art.rusty ? 'Rusty' : ART_LABEL[art.kind], { fontFamily: FONT, fontSize: '9px', fontStyle: '600', color: T.text, stroke: '#0B1020', strokeThickness: 3 }).setOrigin(0.5));
+        }
+      }
+      if (m.defId === 'beam' || m.defId === 'grapple') {
         hitZone(c, () => (moving ? this.cancelMove() : this.onBeamTap(beamIndex(m.uid))));
       } else if (m.defId === 'solar') {
-        this.solarTile(c);
         hitZone(c, () => (moving ? this.cancelMove() : this.showSolarSheet(m.uid)));
       } else if (m.defId === 'engine') {
-        this.placeholder(owned, c, ENGINE_COLOR, 'Engine');
         hitZone(c, () => (moving ? this.cancelMove() : this.showEngineSheet(m.uid)));
       } else if (m.defId === 'winch') {
-        this.placeholder(owned, c, 0x8a6a2a, 'Winch');
         hitZone(c, () => (moving ? this.cancelMove() : this.showWinchSheet(m.uid)));
       } else if (m.defId === 'smasher') {
-        const rusty = !this.state.smashers.find((u) => u.uid === m.uid)?.repaired;
-        this.placeholder(owned, c, rusty ? 0x6b5648 : C.crusher, rusty ? 'Rusty' : 'Smash');
         hitZone(c, () => (moving ? this.cancelMove() : this.showSmasherSheet(m.uid)));
       } else if (m.defId === 'smelter') {
-        this.placeholder(owned, c, SMELTER_COLOR, 'Smelt');
         hitZone(c, () => (moving ? this.cancelMove() : this.showSmelterSheet(m.uid)));
       }
     }
+    if (!paint) { g.destroy(); return; }
+    // bake the static ship into one image: vector shapes are re-triangulated every frame, an image is not
+    const rt = this.add.renderTexture(0, 0, Math.ceil(bw * res), Math.ceil(bh * res)).setOrigin(0, 0);
+    g.setScale(res);
+    rt.draw(g, -bx * res, -by * res);
+    this.layer.remove(g);
+    g.destroy();
+    rt.setPosition(bx, by).setScale(1 / res);
+    this.layer.addAt(rt, 0);
   }
 
-  private placeholder(owned: Cell[], cell: Cell, color: number, label: string, outline = false): void {
-    if (!owned.some((o) => cellKey(o) === cellKey(cell))) return;
-    const { x, y } = this.px(cell);
-    const g = this.add.graphics();
-    g.fillStyle(color, 1).fillRoundedRect(x + 7, y + 7, TILE - 14, TILE - 14, 8);
-    if (outline) g.lineStyle(2, C.beam, 0.9).strokeRoundedRect(x + 7, y + 7, TILE - 14, TILE - 14, 8);
-    const t = this.shipTxt(x + TILE / 2, y + TILE / 2, label, { fontFamily: FONT, fontSize: '12px', color: T.text }).setOrigin(0.5);
-    this.layer.add([g, t]);
+  /** Text labels on module tiles: the player's choice, or (auto) on until the ship has 6 modules. */
+  private labelsOn(): boolean {
+    if (this.labels !== 'auto') return this.labels === 'on';
+    return this.state.ship.modules.length < 6;
   }
 
-  /** Solar Wing tile: a blue panel with cell lines, readable in greyscale by its stripes. */
-  private solarTile(cell: Cell): void {
-    const { x, y } = this.px(cell);
-    const g = this.add.graphics();
-    g.fillStyle(SOLAR_COLOR, 1).fillRoundedRect(x + 7, y + 7, TILE - 14, TILE - 14, 8);
-    g.lineStyle(2, 0x9fd0ff, 0.8);
-    for (let i = 1; i < 4; i++) g.lineBetween(x + 7 + ((TILE - 14) * i) / 4, y + 10, x + 7 + ((TILE - 14) * i) / 4, y + TILE - 10);
-    g.lineBetween(x + 10, y + TILE / 2, x + TILE - 10, y + TILE / 2);
-    const t = this.shipTxt(x + TILE / 2, y + TILE / 2, 'Solar', { fontFamily: FONT, fontSize: '12px', fontStyle: '600', color: T.text, stroke: '#0B1020', strokeThickness: 3 }).setOrigin(0.5);
-    this.layer.add([g, t]);
+  /** Screen direction a module faces open space (beams fire that way). Prefers top, bottom, front, back. */
+  private outward(cell: string): Dir {
+    const sides = exposedSides(new Set(this.state.ship.ownedCells), parseKey(cell));
+    // template sides (up, right, down, left) map to screen (left, down, right, up): the ship points left
+    const screen: Dir[] = ['left', 'down', 'right', 'up'];
+    const dirs = sides.map((i) => screen[i]);
+    for (const d of ['up', 'down', 'left', 'right'] as Dir[]) if (dirs.includes(d)) return d;
+    return 'up';
   }
 
-  /** A claw mark on the Grapple tile so it differs from a Tractor Beam without colour. */
-  private grappleGlyph(cell: Cell): void {
-    const { x, y } = this.px(cell);
-    const g = this.add.graphics();
-    const cx = x + TILE / 2, cy = y + TILE / 2 + 10;
-    g.lineStyle(3, 0xbff5ef, 0.9);
-    g.lineBetween(cx - 9, cy + 4, cx - 4, cy - 4);
-    g.lineBetween(cx + 9, cy + 4, cx + 4, cy - 4);
-    g.lineBetween(cx - 4, cy - 4, cx + 4, cy - 4);
-    this.layer.add(g);
+  /** What to draw for a module: art kind, level, facing, Rusty, and whether it draws power. */
+  private artFor(uid: number): { kind: ArtKind; level: number; dir: Dir; rusty: boolean; draws: boolean } | null {
+    const st = this.state;
+    const m = st.ship.modules.find((x) => x.uid === uid);
+    if (!m) return null;
+    const dir = m.defId === 'beam' || m.defId === 'grapple' ? this.outward(m.cell) : 'up';
+    const draws = moduleDraw(st, m) > 0;
+    switch (m.defId) {
+      case 'beam': case 'grapple': return { kind: m.defId, level: st.beams.find((b) => b.uid === uid)?.level ?? 1, dir, rusty: false, draws };
+      case 'smasher': {
+        const u = st.smashers.find((x) => x.uid === uid);
+        return { kind: 'smasher', level: u?.level ?? 1, dir, rusty: !u?.repaired, draws };
+      }
+      case 'smelter': return { kind: 'smelter', level: st.smelters.find((x) => x.uid === uid)?.level ?? 1, dir, rusty: false, draws };
+      case 'solar': case 'engine': return { kind: m.defId, level: m.level ?? 1, dir, rusty: false, draws };
+      case 'winch': return { kind: 'winch', level: 1, dir, rusty: false, draws };
+      default: return null;
+    }
   }
 
   private drawGhosts(): void {
@@ -677,7 +751,7 @@ export class ShipScene extends Phaser.Scene {
         })
         .setOrigin(0.5);
       this.tileActions.set(cellKey(c), () => this.tryBuy(c));
-      this.layer.add([g, label]);
+      this.ghostLayer.add([g, label]);
     }
   }
 
@@ -848,14 +922,17 @@ export class ShipScene extends Phaser.Scene {
     const out = tapBeam(this.state, index);
     if (out.state === this.state) return;
     this.apply(out.state);
+    this.puff(beam.uid);
     this.floatAtUid(beam.uid, beam.kind === 'grapple' ? 'Grapple on' : 'Beam on', T.gold);
   }
 
   /** The Fire button: every idle beam at once. */
   private onFire(): void {
+    const before = this.state;
     const out = tapAllBeams(this.state);
     if (out.state === this.state) return;
     this.apply(out.state);
+    out.state.beams.forEach((b, i) => { if (b.status === 'counting' && before.beams[i]?.status === 'idle') this.puff(b.uid); });
     this.floatAtModule('beam', 0, this.state.beams.length > 1 ? 'Beams on' : 'Beam on', T.gold);
   }
 
@@ -1440,6 +1517,9 @@ export class ShipScene extends Phaser.Scene {
       fn: () => {
         const out = depart(this.state);
         if (out.state === this.state) { const c = canDepart(this.state); if (!c.ok) this.showToast(c.label); return; }
+        const eng = out.state.ship.modules.find((m) => m.defId === 'engine');
+        if (eng) this.flashAt.set(eng.uid, this.elapsed); // ignition
+        if (!this.calm) this.cameras.main.shake(260, 0.004);
         this.apply(out.state);
         this.closeSheet();
         this.showToast(`Under way to ${next.name}`);
@@ -1780,6 +1860,15 @@ export class ShipScene extends Phaser.Scene {
       rows: [
         { t: 'text', text: `Version ${this.versionLine()}` },
         { t: 'button', label: 'Help', fn: () => this.showHelp() },
+        {
+          t: 'switch', title: 'Calm mode', sub: 'No screen shake or flashes, slower animations.', on: this.calm,
+          fn: () => { this.calm = !this.calm; this.saveView(); this.refreshSheet(); },
+        },
+        {
+          t: 'switch', title: 'Labels on modules', sub: this.labels === 'auto' ? 'On until your ship has 6 modules.' : this.labels === 'on' ? 'Always on.' : 'Off: the art shows what each module is.',
+          on: this.labelsOn(),
+          fn: () => { this.labels = this.labelsOn() ? 'off' : 'on'; this.saveView(); this.redraw(); this.refreshSheet(); },
+        },
         { t: 'button', label: 'Copy save', fn: () => this.copySave() },
         { t: 'button', label: 'Paste save', fn: () => this.pasteSave() },
         { t: 'button', label: 'Reset save', fn: () => this.showResetConfirm() },
@@ -1866,7 +1955,7 @@ export class ShipScene extends Phaser.Scene {
     for (const e of events) {
       switch (e.kind) {
         case 'hit':
-          this.shake = e.crit ? 1 : 0.45;
+          this.shake = this.calm ? 0 : e.crit ? 1 : 0.45;
           this.chips(x, y, e.crit ? C.crit : 0xc8bdb2, e.crit ? 10 : 5);
           if (e.crit) this.floatText(x, y - 20, '3x', T.gold);
           break;
@@ -1884,6 +1973,7 @@ export class ShipScene extends Phaser.Scene {
           if (e.shard) this.floatText(STAGE.cx, STAGE.cy - 96, 'Core Shard!', '#8A5CE0');
           break;
         case 'rock_arrived':
+          if (e.uid !== undefined) this.flashAt.set(e.uid, this.elapsed);
           if (e.to === 'smasher') {
             this.floatAtModule('smasher', 0, 'To Smasher', T.dim);
           } else {
@@ -1909,6 +1999,7 @@ export class ShipScene extends Phaser.Scene {
           this.floatAtUid(e.uid, `+${e.ore} Ore${e.ice ? ` +${e.ice} Ice` : ''}`, T.text);
           break;
         case 'smelted':
+          if (e.uid !== undefined) this.flashAt.set(e.uid, this.elapsed);
           this.floatAtUid(e.uid, `+${e.plate} Plate`, '#9FB4D6');
           break;
         default:
@@ -1991,6 +2082,56 @@ export class ShipScene extends Phaser.Scene {
     return t;
   }
 
+  /** Recoil puffs: two small RCS clouds at a beam's lip when it fires (skipped in Calm mode). */
+  private puff(uid: number): void {
+    if (this.calm) return;
+    const m = this.state.ship.modules.find((x) => x.uid === uid);
+    if (!m) return;
+    const p = this.px(parseKey(m.cell));
+    const dir = this.outward(m.cell);
+    const v = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] }[dir];
+    const cx = p.x + TILE / 2 + v[0] * 26, cy = p.y + TILE / 2 + v[1] * 26;
+    for (const s of [-1, 1]) {
+      const ox = -v[1] * s * 16, oy = v[0] * s * 16;
+      const c = this.add.circle(cx + ox, cy + oy, 3, 0xdfe6f5, 0.75);
+      this.ship.add(c);
+      this.tweens.add({ targets: c, x: cx + ox * 2, y: cy + oy * 2, scale: 2.6, alpha: 0, duration: 380, ease: 'Cubic.easeOut', onComplete: () => c.destroy() });
+    }
+  }
+
+  /** 1 right after a module's last event (rock landed, Plate made, Depart), fading to 0 over 0.6 s. */
+  private flashOf(uid: number): number {
+    const at = this.flashAt.get(uid);
+    return at === undefined ? 0 : Math.max(0, 1 - (this.elapsed - at) / 0.6);
+  }
+
+  /** Beams an Auto-Winch on `cell` is touching, with the direction (screen) toward each. */
+  private winchTargets(cell: string, winched: Set<number>): { uid: number; dir: Dir }[] {
+    const c = parseKey(cell);
+    const out: { uid: number; dir: Dir }[] = [];
+    for (const m of this.state.ship.modules) {
+      if (!winched.has(m.uid)) continue;
+      const o = parseKey(m.cell);
+      const dx = o.x - c.x, dy = o.y - c.y;
+      if (Math.abs(dx) + Math.abs(dy) !== 1) continue;
+      // template (dx, dy) -> screen: column = y, row = x
+      out.push({ uid: m.uid, dir: dy === 1 ? 'right' : dy === -1 ? 'left' : dx === 1 ? 'down' : 'up' });
+    }
+    return out;
+  }
+
+  /** A dotted cyan line with dots flowing from a to b (power lines). */
+  private dottedLine(g: Phaser.GameObjects.Graphics, ax: number, ay: number, bx: number, by: number, t: number): void {
+    const len = Math.hypot(bx - ax, by - ay);
+    const step = 9;
+    const off = (t * 24) % step;
+    for (let d = off; d < len; d += step) {
+      const k = d / len;
+      g.fillStyle(C.power, 0.95).fillCircle(ax + (bx - ax) * k, ay + (by - ay) * k, 2.2);
+    }
+    g.lineStyle(2, C.power, 0.9).strokeCircle(bx, by, 22);
+  }
+
   /** "4:05" for a number of seconds. */
   private clock(sec: number): string {
     const t = Math.max(0, Math.ceil(sec));
@@ -2047,58 +2188,85 @@ export class ShipScene extends Phaser.Scene {
       this.setText(this.shipLabel(key), x, y, str, color);
       used.add(key);
     };
-    for (const m of st.ship.modules) {
-      if (m.defId !== 'beam' && m.defId !== 'grapple') continue;
-      const beam = st.beams.find((b) => b.uid === m.uid);
-      if (!beam) continue;
-      const bp = this.px(parseKey(m.cell));
-      const bcx = bp.x + TILE / 2, bcy = bp.y + TILE / 2;
-      const live = power.powered.has(m.uid);
-      let text = '';
-      if (beam.status === 'counting') {
-        const total = beamCountdown(beam, power.boosted.has(m.uid));
-        const frac = Math.min(1, 1 - beam.remaining / total);
-        sg.lineStyle(4, C.beam, 1).beginPath().arc(bcx, bcy, 18, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac, false).strokePath();
-        sg.lineStyle(4, C.hull, 0.35).strokeCircle(bcx, bcy, 18);
-        text = String(Math.ceil(Math.max(0, beam.remaining)));
-      } else if (beam.status === 'idle' && (room <= 0 || !live)) {
-        sg.lineStyle(3, C.hull, 0.35).strokeRoundedRect(bp.x + 2, bp.y + 2, TILE - 4, TILE - 4, 10); // no room in the Bay, or no power
-      } else if (beam.status === 'idle') {
-        const pulse = 0.55 + 0.45 * Math.sin(now * 5);
-        sg.lineStyle(3, C.crit, st.flags.tappedBeam ? 0.9 : pulse).strokeRoundedRect(bp.x + 2, bp.y + 2, TILE - 4, TILE - 4, 10);
-      } else {
-        sg.lineStyle(3, 0xffa733, 1).strokeRoundedRect(bp.x + 2, bp.y + 2, TILE - 4, TILE - 4, 10);
-        text = 'Full';
-      }
-      this.levelPips(sg, bp.x, bp.y, beam.level);
-      label(`b${m.uid}`, bcx, bcy, text);
+    // exterior: nav lights, beacon, thrusters by Engine state
+    const engine = st.ship.modules.find((m) => m.defId === 'engine');
+    if (this.exterior) {
+      const thrust: ThrustState = !engine ? 'none' : !power.powered.has(engine.uid) ? 'off' : inTransit(st) ? 'cruising' : 'parked';
+      drawExteriorFx(sg, this.exterior, { t: now, thrust, boosted: !!engine && power.boosted.has(engine.uid), flash: engine ? this.flashOf(engine.uid) : 0, calm: this.calm });
     }
-    st.ship.modules.filter((m) => m.defId === 'smelter').forEach((m) => {
-      const unit = st.smelters.find((u) => u.uid === m.uid);
-      if (!unit) return;
-      const sp = this.px(parseKey(m.cell));
-      const cx = sp.x + TILE / 2, cy = sp.y + TILE / 2;
-      let text = '';
-      if (!unit.on) {
-        sg.fillStyle(0x000000, 0.5).fillRoundedRect(sp.x + 7, sp.y + 7, TILE - 14, TILE - 14, 8);
-        text = 'OFF';
-      } else if (unit.progress > 0) {
-        sg.lineStyle(4, 0x2a1810, 0.45).strokeCircle(cx, cy, 20);
-        sg.lineStyle(4, C.crit, 1).beginPath().arc(cx, cy, 20, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * unit.progress, false).strokePath();
-      }
-      this.levelPips(sg, sp.x, sp.y, unit.level);
-      label(`s${m.uid}`, cx, cy, text);
-    });
+    // modules: live animations from their real state
+    const winched = winchedBeams(st, power);
     for (const m of st.ship.modules) {
-      if (m.defId === 'solar' || m.defId === 'engine') {
-        const p = this.px(parseKey(m.cell));
-        this.levelPips(sg, p.x, p.y, m.level ?? 1);
+      const art = this.artFor(m.uid);
+      if (!art) continue;
+      const p = this.px(parseKey(m.cell));
+      const cx = p.x + TILE / 2, cy = p.y + TILE / 2;
+      const fx = {
+        t: now, dir: art.dir, level: art.level, working: false, progress: 0,
+        powered: !art.draws || power.powered.has(m.uid), boosted: power.boosted.has(m.uid),
+        flash: this.flashOf(m.uid), calm: this.calm, rusty: art.rusty,
+        cruising: m.defId === 'engine' && inTransit(st), targets: undefined as Dir[] | undefined,
+      };
+      if (m.defId === 'beam' || m.defId === 'grapple') {
+        const beam = st.beams.find((b) => b.uid === m.uid);
+        if (!beam) continue;
+        const live = power.powered.has(m.uid);
+        if (beam.status !== 'idle') {
+          fx.working = true;
+          fx.progress = beam.status === 'blocked' ? 1 : Math.min(1, 1 - beam.remaining / beamCountdown(beam, power.boosted.has(m.uid)));
+        }
+        drawFx(sg, art.kind, p.x, p.y, fx);
+        let text = '';
+        if (beam.status === 'counting' && beam.remaining > 2) text = String(Math.ceil(beam.remaining)); // the Grapple's 12 s
+        if (beam.status === 'idle' && (room <= 0 || !live)) {
+          sg.lineStyle(3, C.hull, 0.35).strokeRoundedRect(p.x + 2, p.y + 2, TILE - 4, TILE - 4, 10); // no room in the Bay, or no power
+        } else if (beam.status === 'idle') {
+          const pulse = 0.55 + 0.45 * Math.sin(now * 5);
+          sg.lineStyle(3, C.crit, st.flags.tappedBeam ? 0.9 : pulse).strokeRoundedRect(p.x + 2, p.y + 2, TILE - 4, TILE - 4, 10);
+        } else if (beam.status === 'blocked') {
+          sg.lineStyle(3, 0xffa733, 1).strokeRoundedRect(p.x + 2, p.y + 2, TILE - 4, TILE - 4, 10);
+          text = 'Full';
+        }
+        label(`b${m.uid}`, cx, p.y + TILE - 11, text);
+        continue;
       }
-      if (m.defId === 'engine' && inTransit(st) && power.powered.has(m.uid)) {
-        // exhaust flicker while cruising
-        const p = this.px(parseKey(m.cell));
-        const f = 0.6 + 0.4 * Math.sin(now * 23);
-        sg.fillStyle(0xffa733, f).fillTriangle(p.x + TILE - 4, p.y + TILE / 2 - 8, p.x + TILE - 4, p.y + TILE / 2 + 8, p.x + TILE + 14 + 6 * f, p.y + TILE / 2);
+      if (m.defId === 'smasher') {
+        const u = st.smashers.find((x) => x.uid === m.uid);
+        const head = u?.queue[0];
+        fx.working = !!u?.repaired && !!head;
+        fx.progress = head ? 1 - head.hp / head.maxHp : 0;
+      } else if (m.defId === 'smelter') {
+        const u = st.smelters.find((x) => x.uid === m.uid);
+        fx.working = !!u?.on && (u?.progress ?? 0) > 0;
+        fx.progress = u?.progress ?? 0;
+        if (u && !u.on) {
+          sg.fillStyle(0x000000, 0.5).fillRoundedRect(p.x + 7, p.y + 7, TILE - 14, TILE - 14, 8);
+          label(`s${m.uid}`, cx, cy, 'OFF');
+        }
+      } else if (m.defId === 'solar') {
+        fx.working = true;
+      } else if (m.defId === 'engine') {
+        fx.working = fx.cruising;
+      } else if (m.defId === 'winch') {
+        const mine = this.winchTargets(m.cell, winched);
+        fx.targets = mine.map((t) => t.dir);
+        fx.working = mine.some((t) => st.beams.find((b) => b.uid === t.uid)?.status === 'counting');
+      }
+      drawFx(sg, art.kind, p.x, p.y, fx);
+    }
+    // power lines: while a Solar Wing's sheet is open, show every module it powers
+    if (this.sheetKind.startsWith('solar:')) {
+      const sid = Number(this.sheetKind.slice(6));
+      const sol = st.ship.modules.find((m) => m.uid === sid);
+      if (sol) {
+        const a = this.px(parseKey(sol.cell));
+        for (const [uid, src] of power.from) {
+          if (src !== sid) continue;
+          const tgt = st.ship.modules.find((m) => m.uid === uid);
+          if (!tgt) continue;
+          const b = this.px(parseKey(tgt.cell));
+          this.dottedLine(sg, a.x + TILE / 2, a.y + TILE / 2, b.x + TILE / 2, b.y + TILE / 2, now);
+        }
       }
     }
     this.drawPowerBadges(sg, st, power);
@@ -2235,13 +2403,6 @@ export class ShipScene extends Phaser.Scene {
     this.drawArrows(g);
   }
 
-  /** Small level dots along the bottom of a tile (level 1 shows none). */
-  private levelPips(g: Phaser.GameObjects.Graphics, x: number, y: number, level: number): void {
-    for (let i = 1; i < level; i++) {
-      g.fillStyle(C.crit, 1).fillCircle(x + 12 + (i - 1) * 9, y + TILE - 9, 2.6);
-    }
-  }
-
   private heatColor(f: number): number {
     return f >= 0.9 ? C.coral : f >= 0.7 ? C.crusher : f >= 0.5 ? C.crit : C.beam;
   }
@@ -2275,12 +2436,7 @@ export class ShipScene extends Phaser.Scene {
         if (goal) g.lineStyle(3, C.crit, 0.55 + 0.45 * Math.sin(this.elapsed * 5)).strokeRoundedRect(sp.x + 2, sp.y + 2, TILE - 4, TILE - 4, 10);
         continue;
       }
-      const head = sm.queue[0];
-      if (head) {
-        const frac = 1 - head.hp / head.maxHp;
-        g.lineStyle(4, 0x2a2320, 0.4).strokeCircle(cx, cy, 20);
-        g.lineStyle(4, C.crit, 1).beginPath().arc(cx, cy, 20, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac, false).strokePath();
-      }
+      void cy;
       const cap = SMASHER.levels[sm.level - 1].queue;
       for (let i = 0; i < cap; i++) {
         const px = cx - ((cap - 1) * 7) / 2 + i * 7;
@@ -2333,6 +2489,7 @@ export class ShipScene extends Phaser.Scene {
 
   private initStars(): void {
     this.starG = this.add.graphics(); // created first, so it sits behind everything
+    this.bgG = this.add.graphics(); // field scenery, above the stars and behind the ship
     const rnd = new Phaser.Math.RandomDataGenerator(['stars']);
     for (let i = 0; i < 60; i++) {
       this.stars.push({ x: rnd.between(0, W), y: rnd.between(0, H), r: rnd.realInRange(0.6, 1.6), a: rnd.realInRange(0.1, 0.45), z: rnd.realInRange(0.3, 1) });
@@ -2340,8 +2497,50 @@ export class ShipScene extends Phaser.Scene {
     this.drawStars(0);
   }
 
+  /**
+   * Field scenery behind the ship (graphics pass G4): Scrapyard girders, Belt rubble, the rings and planet of
+   * Veda. Nothing in the void while cruising. Redrawn only when the place changes; drifts slowly.
+   */
+  private drawBackground(): void {
+    const key = inTransit(this.state) ? 'void' : currentNode(this.state).id;
+    this.bgG.x = this.calm ? 0 : Math.sin(this.elapsed * 0.05) * 8;
+    if (key === this.bgKey) return;
+    this.bgKey = key;
+    const g = this.bgG;
+    g.clear();
+    const rnd = new Phaser.Math.RandomDataGenerator([key]);
+    const top = VIEW.y, bottom = VIEW.y + VIEW.h;
+    if (key === 'scrapyard') {
+      for (let i = 0; i < 7; i++) {
+        const x = rnd.between(-20, W), y = rnd.between(top, bottom), w = rnd.between(40, 110), h = rnd.between(5, 10);
+        const a = rnd.realInRange(-0.6, 0.6);
+        const c = Math.cos(a), s2 = Math.sin(a);
+        const pts = [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]].map(([u, v]) => ({ x: x + u * c - v * s2, y: y + u * s2 + v * c }));
+        g.fillStyle(0x1c2542, 1).fillPoints(pts, true);
+        for (let k = -w / 2 + 8; k < w / 2; k += 14) g.fillStyle(0x0f1630, 1).fillCircle(x + k * c, y + k * s2, 2);
+      }
+    } else if (key === 'belt' || key === 'rings') {
+      if (key === 'rings') {
+        g.fillStyle(0x2a2350, 1).fillCircle(W + 30, top + 40, 120);
+        g.fillStyle(0x352c66, 1).fillCircle(W + 22, top + 30, 104);
+        g.lineStyle(6, 0x4a3f7a, 0.6).strokeEllipse(W + 30, top + 40, 420, 70);
+        g.lineStyle(2, 0x6a5ca0, 0.5).strokeEllipse(W + 30, top + 40, 470, 84);
+      }
+      const n = key === 'belt' ? 16 : 9;
+      for (let i = 0; i < n; i++) {
+        const x = rnd.between(-10, W + 10), y = rnd.between(top, bottom), r = rnd.between(3, key === 'belt' ? 14 : 8);
+        const pts = Array.from({ length: 7 }, (_, k) => {
+          const a = (k / 7) * Math.PI * 2, rr = r * rnd.realInRange(0.75, 1.1);
+          return { x: x + Math.cos(a) * rr, y: y + Math.sin(a) * rr };
+        });
+        g.fillStyle(key === 'belt' ? 0x232a40 : 0x262248, 1).fillPoints(pts, true);
+      }
+    }
+  }
+
   /** Stars drift slowly when parked and streak past (left to right: the nose points left) while cruising. */
   private drawStars(dt: number): void {
+    this.drawBackground();
     const cruising = inTransit(this.state) && engineSpeed(this.state) > 0;
     const speed = cruising ? 260 : 3;
     this.starShift += speed * dt;

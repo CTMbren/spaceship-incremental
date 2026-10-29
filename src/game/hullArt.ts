@@ -12,6 +12,17 @@ const ACCENT = 0xf0704a; // warm tug orange
 export const GOLD_TRIM = 0xffc83d;
 let accent = ACCENT; // set per draw (render-only state)
 
+/** Where the live exterior effects go (graphics pass G4): nav lights, beacon, thruster exits, nose decal. */
+export interface ExteriorInfo {
+  lights: { x: number; y: number; color: number }[];
+  bells: { x: number; y: number }[];
+  beacon: { x: number; y: number } | null;
+  decal: { x: number; y: number } | null;
+}
+let info: ExteriorInfo = { lights: [], bells: [], beacon: null, decal: null };
+const PORT = 0xff5a5f; // red, top side (the ship points left)
+const STARBOARD = 0x4ade80; // green, bottom side
+
 const grow = (pts: Pt[], k: number): Pt[] => {
   const cx = pts.reduce((a, p) => a + p.x, 0) / pts.length;
   const cy = pts.reduce((a, p) => a + p.y, 0) / pts.length;
@@ -32,8 +43,9 @@ function shape(g: G, pts: Pt[], fill: number, outlineK = 1.16): void {
  * `finished` is the screen-cell set of the finished hull; fins only go where it ends. `ghosts` are the screen
  * cells of the buyable tiles shown beside the hull; no engine bell is drawn under one.
  */
-export function drawHullExterior(g: G, owned: Cell[], finished: Set<string>, ghosts: Set<string> = new Set(), trim: number = ACCENT): void {
+export function drawHullExterior(g: G, owned: Cell[], finished: Set<string>, ghosts: Set<string> = new Set(), trim: number = ACCENT): ExteriorInfo {
   accent = trim;
+  info = { lights: [], bells: [], beacon: null, decal: null };
   const cells: ScreenCell[] = owned.map(toScreen);
   const set = new Set(cells.map(key));
   const has = (col: number, row: number) => set.has(`${col},${row}`);
@@ -95,6 +107,22 @@ export function drawHullExterior(g: G, owned: Cell[], finished: Set<string>, gho
       g.fillStyle(C.hullRim, 1).fillRoundedRect(x - 4, y, 4, h, 2);
     }
   }
+
+  // ---- plating: vent slots on long top edges, a white beacon on the highest one ------------------
+  let topMost: EdgeRun | null = null;
+  for (const r of runs) {
+    if (r.side !== 'top') continue;
+    if (!topMost || r.line < topMost.line || (r.line === topMost.line && r.end - r.start > topMost.end - topMost.start)) topMost = r;
+    const len = r.end - r.start + 1;
+    if (len >= 2) {
+      const vx = r.start * S + S - 6;
+      for (let i = 0; i < 3; i++) g.fillStyle(C.hullOutline, 0.7).fillRoundedRect(vx + i * 5, r.line * S - 8, 2.5, 6, 1);
+    }
+  }
+  if (topMost) info.beacon = { x: ((topMost.start + topMost.end + 1) / 2) * S, y: topMost.line * S - 6 };
+  // a light whose fin tip is tucked behind a tile would shine through the hull: drop it
+  info.lights = info.lights.filter((l) => !has(Math.floor(l.x / S), Math.floor(l.y / S)));
+  return info;
 }
 
 function rivets(g: G, x: number, y: number, w: number, horizontal: boolean): void {
@@ -120,8 +148,15 @@ function fin(g: G, r: EdgeRun): void {
     { x: x0 + 12, y: edge + dir * h * 0.55 },
   ];
   shape(g, pts, C.hull, 1.12);
+  // lower shade, panel seam and vent slots
+  g.fillStyle(0x6a7894, 1).fillPoints([{ x: x0 + 12, y: edge + dir * h * 0.55 }, { x: tipX, y: edge + dir * h }, { x: x1 - 4, y: edge + dir * h * 0.72 }, { x: x0 + 16, y: edge + dir * h * 0.6 }], true);
+  g.lineStyle(1.2, C.hullOutline, 0.55).lineBetween(x0 + 10, edge + dir * h * 0.3, x1, edge + dir * h * 0.3);
+  for (let i = 0; i < 3; i++) g.fillStyle(C.hullOutline, 0.6).fillRoundedRect(x0 + 18 + i * 6, edge + dir * (h * 0.15) - 1.5, 3.5, 3, 1);
   // accent tip
   g.fillStyle(accent, 1).fillTriangle(tipX, edge + dir * h, x1 - 6, edge + dir * h * 0.62, x1 + 2, edge + dir * h * 0.3);
+  info.lights.push({ x: tipX - 3, y: edge + dir * (h - 3), color: r.side === 'top' ? PORT : STARBOARD });
+  // the tug number goes on the first long top fin
+  if (!info.decal && r.side === 'top' && len >= 2) info.decal = { x: x0 + (x1 - x0) * 0.5, y: edge + dir * h * 0.32 };
 }
 
 /** Pointed nose on the leading column, small chamfered shoulders elsewhere. */
@@ -145,6 +180,11 @@ function nose(g: G, r: EdgeRun, leading: boolean): void {
     g.fillStyle(C.beam, 0.85).fillRoundedRect(x - tip * 0.62 + 2, mid - ch / 2, tip * 0.7 - 4, ch, 6);
     g.fillStyle(C.highlight, 0.7).fillRoundedRect(x - tip * 0.62 + 5, mid - ch / 2 + 3, tip * 0.7 - 12, 4, 2);
     g.fillStyle(accent, 1).fillCircle(x - tip + 3, mid, 3);
+    // panel seams on the cone, and the tug number below the canopy
+    g.lineStyle(1.2, C.hullOutline, 0.5);
+    g.lineBetween(x - tip * 0.55, top + (bottom - top) * 0.2 + 3, x - 4, top + 6);
+    g.lineBetween(x - tip * 0.55, bottom - (bottom - top) * 0.2 - 3, x - 4, bottom - 6);
+    void ch;
   } else {
     const d = 12;
     const pts: Pt[] = [
@@ -170,8 +210,15 @@ function engines(g: G, r: EdgeRun, ghosts: Set<string>): void {
       { x, y: cy + 14 },
     ];
     shape(g, pts, 0x3a4668, 1.14);
-    g.fillStyle(C.beam, 0.4).fillRoundedRect(x + 18, cy - 13, 22, 26, 12);
-    g.fillStyle(C.beam, 0.9).fillRoundedRect(x + 18, cy - 7, 13, 14, 7);
-    g.fillStyle(C.highlight, 0.9).fillRoundedRect(x + 18, cy - 3, 7, 6, 3);
+    // hazard band on the bell housing, then the nozzle ring
+    for (let i = 0; i < 4; i++) {
+      g.fillStyle(i % 2 ? C.hullOutline : C.crit, 1).fillPoints([
+        { x: x + 4 + i * 3, y: cy - 15 - i * 0.6 }, { x: x + 7 + i * 3, y: cy - 15.5 - i * 0.6 }, { x: x + 7 + i * 3, y: cy - 12 }, { x: x + 4 + i * 3, y: cy - 12 },
+      ], true);
+    }
+    g.fillStyle(0x2a3350, 1).fillRoundedRect(x + 15, cy - 19, 5, 38, 2);
+    g.fillStyle(0x8fa0be, 1).fillRoundedRect(x + 16, cy - 18, 2, 36, 1);
+    g.fillStyle(C.beam, 0.35).fillRoundedRect(x + 18, cy - 11, 8, 22, 4);
+    info.bells.push({ x: x + 20, y: cy });
   }
 }

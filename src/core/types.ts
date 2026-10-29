@@ -196,7 +196,7 @@ export interface GameState {
 
 export type GameEvent =
   /** `to` says where the rock went: the Bay, or straight into the Smasher queue (auto-intake). */
-  | { kind: 'rock_arrived'; geode: boolean; to?: 'bay' | 'smasher' }
+  | { kind: 'rock_arrived'; geode: boolean; to?: 'bay' | 'smasher'; uid?: number }
   | { kind: 'beam_blocked' }
   | { kind: 'hit'; crit: boolean }
   | { kind: 'overheat' }

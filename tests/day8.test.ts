@@ -379,3 +379,15 @@ describe('a full ship that cannot grow yet', () => {
     void chipText;
   });
 });
+
+describe('power lines (graphics pass)', () => {
+  it('says which Solar Wing (or the hull, 0) powers each module', () => {
+    let s = own(early(), '1,1', '3,1');
+    s = placed(placed(s, 'solar', '1,1'), 'beam', '3,1');
+    const p = evaluatePower(s);
+    const solar = s.ship.modules.find((m) => m.defId === 'solar')!.uid;
+    expect([...p.from.values()].filter((v) => v === solar).length).toBe(SOLAR.levels[0].output);
+    expect([...p.from.values()].filter((v) => v === 0).length).toBe(p.powered.size - SOLAR.levels[0].output);
+    for (const uid of p.powered) expect(p.from.has(uid)).toBe(true);
+  });
+});

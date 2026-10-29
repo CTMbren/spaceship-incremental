@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { GalleryScene } from './game/GalleryScene';
 import { DPR, H, ShipScene, W } from './game/ShipScene';
 
 async function start(): Promise<void> {
@@ -20,7 +21,8 @@ async function start(): Promise<void> {
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     render: { antialias: true, roundPixels: false },
     input: { activePointers: 3 },
-    scene: [ShipScene],
+    // ?gallery shows the art gallery (every module, state and level) instead of the game
+    scene: new URLSearchParams(window.location.search).has('gallery') ? [GalleryScene] : [ShipScene],
   });
 }
 

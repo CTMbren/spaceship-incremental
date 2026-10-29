@@ -14,6 +14,8 @@ export interface PowerInfo {
   boosted: Set<number>;
   /** Uids of modules that draw power but get none. */
   unpowered: number[];
+  /** Where each powered module's power comes from: a Solar Wing's uid, or 0 for the hull. */
+  from: Map<number, number>;
 }
 
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
@@ -58,6 +60,7 @@ export function evaluatePower(s: GameState): PowerInfo {
   const consumers = s.ship.modules.filter((m) => moduleDraw(s, m) > 0).sort((a, b) => a.uid - b.uid);
   const solars = s.ship.modules.filter((m) => m.defId === 'solar').sort((a, b) => a.uid - b.uid);
   const powered = new Set<number>();
+  const from = new Map<number, number>();
   let supply = POWER.hullBase;
   for (const sol of solars) {
     const lv = solarLevel(sol);
@@ -71,6 +74,7 @@ export function evaluatePower(s: GameState): PowerInfo {
       const d = moduleDraw(s, c);
       if (d <= left) {
         powered.add(c.uid);
+        from.set(c.uid, sol.uid);
         left -= d;
       }
     }
@@ -81,6 +85,7 @@ export function evaluatePower(s: GameState): PowerInfo {
     const d = moduleDraw(s, c);
     if (d <= base) {
       powered.add(c.uid);
+      from.set(c.uid, 0);
       base -= d;
     }
   }
@@ -92,7 +97,7 @@ export function evaluatePower(s: GameState): PowerInfo {
     if (DIRS.some(([dx, dy]) => solarCells.has(`${p.x + dx},${p.y + dy}`))) boosted.add(c.uid);
   }
   const draw = consumers.reduce((n, c) => n + moduleDraw(s, c), 0);
-  return { supply, draw, powered, boosted, unpowered: consumers.filter((c) => !powered.has(c.uid)).map((c) => c.uid) };
+  return { supply, draw, powered, boosted, unpowered: consumers.filter((c) => !powered.has(c.uid)).map((c) => c.uid), from };
 }
 
 /** Speed multiplier for a module: 0 when it needs power and has none, x1.15 with a Boost, else 1. */

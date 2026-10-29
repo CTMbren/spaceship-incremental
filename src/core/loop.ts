@@ -150,12 +150,12 @@ export function tick(state: GameState, dt: number, forceGeode?: boolean, opts: T
         sm.queue.push(rock);
         beam.status = 'idle';
         beam.remaining = 0;
-        events.push({ kind: 'rock_arrived', geode: false, to: 'smasher' });
+        events.push({ kind: 'rock_arrived', geode: false, to: 'smasher', uid: beam.uid });
       } else if (s.bay.length < baySize(s)) {
         s.bay.push(rock);
         beam.status = 'idle';
         beam.remaining = 0;
-        events.push({ kind: 'rock_arrived', geode: rock.geode, to: 'bay' });
+        events.push({ kind: 'rock_arrived', geode: rock.geode, to: 'bay', uid: beam.uid });
       } else {
         // Bay full: the rock waits at the beam; undo its random draws so the next try is the same rock.
         s.rng = rngBefore;

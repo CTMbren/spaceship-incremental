@@ -73,6 +73,8 @@ export const HELP: readonly HelpCard[] = [
     lines: [
       'Swipe the ship to scroll it. Pinch with two fingers to zoom in or out.',
       'Double-tap empty space to zoom out until the whole ship fits.',
+      'Tap a Solar Wing to see dotted lines to every module it powers.',
+      'Menu: Calm mode turns off shakes and flashes; Labels puts names back on the modules.',
     ],
   },
   {
