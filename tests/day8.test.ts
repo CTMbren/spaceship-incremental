@@ -362,3 +362,20 @@ describe('save v8', () => {
     expect(moveModule(blocked, e.uid, '1,2')).toEqual({ ok: false, reason: 'not_rear' });
   });
 });
+
+describe('a full ship that cannot grow yet', () => {
+  it('asks to make room instead of an Expand hull it cannot pay for (tile 10 needs Ice before the Belt)', async () => {
+    const { chipText, tileOutOfReach } = await import('../src/core/goals');
+    const nine = ['1,0', '1,1', '1,2', '3,1', '3,2', '2,3'];
+    let s = own(early(), ...nine);
+    s = placed(placed(s, 'beam', '1,1'), 'beam', '3,1');
+    s = placed(placed(s, 'smasher', '1,0'), 'smasher', '1,2');
+    s = placed(placed(s, 'smelter', '3,2'), 'smelter', '2,3');
+    s = { ...s, items: { ...s.items, ice: 0 } };
+    expect(tileOutOfReach(s)).toBe(true);
+    expect(currentGoal(s)).toMatchObject({ id: 'make-room', text: expect.stringMatching(/Sell or Move/) });
+    // once the ship has been to the Belt, Ice is just something to collect
+    expect(tileOutOfReach(at(s, 1))).toBe(false);
+    void chipText;
+  });
+});

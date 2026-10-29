@@ -36,6 +36,30 @@ export const HELP: readonly HelpCard[] = [
     ],
   },
   {
+    title: 'Power and Solar Wings',
+    lines: [
+      'Beams, Smashers, Smelters and the Engine need power. The hull makes 3. Power 4/5 at the top of the ship shows what you use and what you have.',
+      'A Solar Wing (outside tile) makes 2 more for modules up to 2 tiles away. Anything touching it gets a Boost: 15% faster, shown by a blue diamond.',
+      'A module without power stops and shows a red bolt. Add a Solar Wing near it, Move it closer to one, or switch a Smelter OFF to free power.',
+    ],
+  },
+  {
+    title: 'Travel and the Map',
+    lines: [
+      'Build an Engine on a back tile (open space to its right), then open the Map tab and tap Depart.',
+      'While you cruise, your beams keep working but only find small drifting rocks with half the Ore. The trip keeps going at full speed while you are away.',
+      'Each field has its own rocks. The Rubble Belt has Ice chunks; the Ring Fields have richer rocks and more geodes.',
+    ],
+  },
+  {
+    title: 'Grapple Beam and Ice',
+    lines: [
+      'Reach the Rubble Belt and you can build a Grapple Beam. It counts down for 12 seconds and pulls one big rock.',
+      'At the Belt and beyond that is a Heavy rock: 12 Ore and 2 Ice, but tough to crack. Smash it if your hands are busy.',
+      'Ice pays for hull tiles 10 and 11.',
+    ],
+  },
+  {
     title: 'Selling',
     lines: [
       'At first Sell sells all your Ore in one tap.',
@@ -55,6 +79,7 @@ export const HELP: readonly HelpCard[] = [
     title: 'While you are away',
     lines: [
       'Your ship keeps working when you close the game, but at a slower pace: 30% for the first 2 hours, 10% after that, up to 8 hours.',
+      'Smelters run for the first 30 minutes and then go cold, so you come back to a pile of raw Ore. Travel runs at full speed the whole time.',
       'Come back to a short report of what it earned. Away for less than 2 minutes counts as nothing.',
     ],
   },

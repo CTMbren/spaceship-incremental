@@ -15,6 +15,21 @@ export interface Goal {
   text: string;
 }
 
+/**
+ * The next hull tile needs something the player cannot get yet (Ice before the Rubble Belt; Coolant, Circuits and
+ * Shards are not in the game yet), so "Expand hull" would be a dead end.
+ */
+export function tileOutOfReach(s: GameState): boolean {
+  const tile = nextTileCost(HULLS[s.ship.hullId], s.ship.ownedCells.length);
+  if (!tile) return false;
+  return Object.entries(tile.items ?? {}).some(([k, v]) => {
+    if (s.items[k as keyof GameState['items']] >= (v ?? 0)) return false;
+    if (k === 'ore' || k === 'plate') return false;
+    if (k === 'ice') return !hasVisited(s, 'belt');
+    return true;
+  });
+}
+
 export const costText = (cost: Cost): string =>
   [
     cost.credits > 0 ? `${cost.credits} credits` : '',
@@ -52,6 +67,13 @@ export function currentGoal(s: GameState): Goal | null {
     const def = HULLS[s.ship.hullId];
     const tile = def ? nextTileCost(def, s.ship.ownedCells.length) : null;
     const why = tractors < 2 ? 'a beam needs an outside tile' : !hasEngine ? 'the Engine needs a back tile' : 'a Grapple needs an outside tile';
+    if (tile && tileOutOfReach(s)) {
+      // a full ship that cannot grow yet: make room instead
+      const kind = !hasEngine && tractors >= 2 ? 'a back' : 'an outside';
+      return freeCells(s).length > 0
+        ? { id: 'make-room', text: `No room: Move a module off ${kind} tile` }
+        : { id: 'make-room', text: 'No free tile: tap a module and Sell or Move it' };
+    }
     const hint = freeCells(s).length > 0 ? ` · ${why}` : '';
     return tile ? { id: 'expand', text: `Expand hull · ${costText(tile)}${hint}` } : null;
   }
@@ -72,6 +94,10 @@ export function chipText(s: GameState): string {
     return `Next: Add a beam on an Open tile · ${costText(beam)}`;
   }
   const tile = nextTileCost(HULLS[s.ship.hullId], s.ship.ownedCells.length);
+  if (tile && tileOutOfReach(s)) {
+    if (!hasVisited(s, 'belt')) return `Next: Fly to the ${ROUTE[1].name} for Ice (bigger hull tiles)`;
+    return 'Hull is as big as it gets for now';
+  }
   if (tile) return `Next: Expand hull · ${costText(tile)}${freeCells(s).length > 0 ? ' · Open tiles are not outside tiles' : ''}`;
   return 'Hull complete';
 }
