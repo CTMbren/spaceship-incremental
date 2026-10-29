@@ -67,6 +67,15 @@ export const MODULES = {
       { credits: 200, items: { plate: 16, ore: 12 } },
     ] as Cost[],
   },
+  /** Day 9: first automation, a Contractor-rank reward. Fires every idle beam touching it, as soon as the Bay has room. */
+  winch: {
+    name: 'Auto-Winch',
+    placement: 'any' as const,
+    costs: [
+      { credits: 0, items: { plate: 14 } },
+      { credits: 300, items: { plate: 20 } },
+    ] as Cost[],
+  },
 } as const;
 
 /** Share of a module's price (and its upgrade credits) paid back when it is sold. */

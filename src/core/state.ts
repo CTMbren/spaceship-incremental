@@ -1,9 +1,10 @@
 import { BAL } from '../data/balance';
 import { HULL_TUG } from '../data/hulls';
 import { cellKey } from './hull';
+import { initialJobs } from './jobs';
 import type { GameState, ItemId } from './types';
 
-export const SAVE_VERSION = 8;
+export const SAVE_VERSION = 9;
 export const ITEM_IDS: readonly ItemId[] = ['ore', 'ice', 'plate', 'coolant', 'circuit', 'core_shard'];
 
 export function createInitialState(seed = 1): GameState {
@@ -31,6 +32,7 @@ export function createInitialState(seed = 1): GameState {
     pity: 0,
     flags: { tappedBeam: false, usedHold: false, holdForGoal: true, powerNotice: 0 },
     travel: { node: 0, dest: null, progress: 0, visited: [0] },
+    jobs: initialJobs(seed ^ 0x5eed),
     savedAt: 0,
   };
 }

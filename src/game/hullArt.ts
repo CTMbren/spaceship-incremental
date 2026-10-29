@@ -8,6 +8,9 @@ type Pt = { x: number; y: number };
 const OUT = 9; // outline thickness around a tile
 const IN = 5; // outline-to-fill inset
 const ACCENT = 0xf0704a; // warm tug orange
+/** Gold trim, the Fleet Partner rank reward (Day 9). */
+export const GOLD_TRIM = 0xffc83d;
+let accent = ACCENT; // set per draw (render-only state)
 
 const grow = (pts: Pt[], k: number): Pt[] => {
   const cx = pts.reduce((a, p) => a + p.x, 0) / pts.length;
@@ -29,7 +32,8 @@ function shape(g: G, pts: Pt[], fill: number, outlineK = 1.16): void {
  * `finished` is the screen-cell set of the finished hull; fins only go where it ends. `ghosts` are the screen
  * cells of the buyable tiles shown beside the hull; no engine bell is drawn under one.
  */
-export function drawHullExterior(g: G, owned: Cell[], finished: Set<string>, ghosts: Set<string> = new Set()): void {
+export function drawHullExterior(g: G, owned: Cell[], finished: Set<string>, ghosts: Set<string> = new Set(), trim: number = ACCENT): void {
+  accent = trim;
   const cells: ScreenCell[] = owned.map(toScreen);
   const set = new Set(cells.map(key));
   const has = (col: number, row: number) => set.has(`${col},${row}`);
@@ -80,11 +84,11 @@ export function drawHullExterior(g: G, owned: Cell[], finished: Set<string>, gho
     if (r.side === 'top') {
       const x = along(r.start) + 8, w = (r.end - r.start + 1) * S - 16, y = r.line * S;
       g.fillStyle(C.hullRim, 1).fillRoundedRect(x, y - 4, w, 4, 2);
-      g.fillStyle(ACCENT, 1).fillRoundedRect(x, y + 1, w, 4, 2);
+      g.fillStyle(accent, 1).fillRoundedRect(x, y + 1, w, 4, 2);
       rivets(g, x, y - 1, w, true);
     } else if (r.side === 'bottom') {
       const x = along(r.start) + 8, w = (r.end - r.start + 1) * S - 16, y = (r.line + 1) * S;
-      g.fillStyle(ACCENT, 1).fillRoundedRect(x, y - 5, w, 4, 2);
+      g.fillStyle(accent, 1).fillRoundedRect(x, y - 5, w, 4, 2);
       rivets(g, x, y + 1, w, true);
     } else if (r.side === 'left') {
       const y = along(r.start) + 8, h = (r.end - r.start + 1) * S - 16, x = r.line * S;
@@ -117,7 +121,7 @@ function fin(g: G, r: EdgeRun): void {
   ];
   shape(g, pts, C.hull, 1.12);
   // accent tip
-  g.fillStyle(ACCENT, 1).fillTriangle(tipX, edge + dir * h, x1 - 6, edge + dir * h * 0.62, x1 + 2, edge + dir * h * 0.3);
+  g.fillStyle(accent, 1).fillTriangle(tipX, edge + dir * h, x1 - 6, edge + dir * h * 0.62, x1 + 2, edge + dir * h * 0.3);
 }
 
 /** Pointed nose on the leading column, small chamfered shoulders elsewhere. */
@@ -140,7 +144,7 @@ function nose(g: G, r: EdgeRun, leading: boolean): void {
     g.fillStyle(C.hullOutline, 1).fillRoundedRect(x - tip * 0.62, mid - ch / 2 - 2, tip * 0.7, ch + 4, 8);
     g.fillStyle(C.beam, 0.85).fillRoundedRect(x - tip * 0.62 + 2, mid - ch / 2, tip * 0.7 - 4, ch, 6);
     g.fillStyle(C.highlight, 0.7).fillRoundedRect(x - tip * 0.62 + 5, mid - ch / 2 + 3, tip * 0.7 - 12, 4, 2);
-    g.fillStyle(ACCENT, 1).fillCircle(x - tip + 3, mid, 3);
+    g.fillStyle(accent, 1).fillCircle(x - tip + 3, mid, 3);
   } else {
     const d = 12;
     const pts: Pt[] = [

@@ -5,6 +5,7 @@ import { POWER, SOLAR } from '../data/power';
 import { SMASHER } from '../data/smasher';
 import { ENGINE, GRAPPLE } from '../data/travel';
 import { canAfford } from './actions';
+import { baySize, jobsStep, noteMade } from './jobs';
 import { evaluatePower, powerMul, type PowerInfo } from './power';
 import { availableQty, SELLABLE, smeltableQty } from './reserve';
 import { nextRandom } from './rng';
@@ -84,7 +85,7 @@ export const smasherQueued = (s: GameState): number => s.smashers.reduce((n, m) 
  * the player can never fire more rocks than the Bay can hold. Fire stays available until this is 0.
  */
 export const bayRoom = (s: GameState): number =>
-  Math.max(0, BAL.baySlots - s.bay.length - s.beams.filter((b) => b.status !== 'idle').length);
+  Math.max(0, baySize(s) - s.bay.length - s.beams.filter((b) => b.status !== 'idle').length);
 
 /** Player taps a beam. Starts its countdown if it is idle and there is room in the Bay. */
 export function tapBeam(state: GameState, index = 0): Outcome {
@@ -122,6 +123,8 @@ export interface TickOptions {
   travelMul?: number;
   /** False pauses every Smelter (offline: Smelters go cold after a while). Default true. */
   smelt?: boolean;
+  /** False keeps the Job Board's production-rate average still (offline output is not the player's pace). */
+  trackRate?: boolean;
 }
 
 /** Advance the world by dt seconds. Pure; returns a new state. */
@@ -148,7 +151,7 @@ export function tick(state: GameState, dt: number, forceGeode?: boolean, opts: T
         beam.status = 'idle';
         beam.remaining = 0;
         events.push({ kind: 'rock_arrived', geode: false, to: 'smasher' });
-      } else if (s.bay.length < BAL.baySlots) {
+      } else if (s.bay.length < baySize(s)) {
         s.bay.push(rock);
         beam.status = 'idle';
         beam.remaining = 0;
@@ -200,6 +203,8 @@ export function tick(state: GameState, dt: number, forceGeode?: boolean, opts: T
         unit.queue.shift();
         s.items.ore += head.ore;
         s.items.ice += head.ice ?? 0;
+        noteMade(s, 'ore', head.ore);
+        noteMade(s, 'ice', head.ice ?? 0);
         s.stats.rocks += 1;
         s.stats.smashed += 1;
         events.push({ kind: 'smashed', ore: head.ore, ice: head.ice ?? 0, uid: unit.uid });
@@ -223,6 +228,7 @@ export function tick(state: GameState, dt: number, forceGeode?: boolean, opts: T
         t = Math.max(0, t - need);
         s.items.ore -= SMELTER.batchIn;
         s.items.plate += SMELTER.batchOut;
+        noteMade(s, 'plate', SMELTER.batchOut);
         s.stats.smelted += SMELTER.batchOut;
         sm.progress = 0;
         events.push({ kind: 'smelted', plate: SMELTER.batchOut, uid: sm.uid });
@@ -235,7 +241,37 @@ export function tick(state: GameState, dt: number, forceGeode?: boolean, opts: T
 
   // Travel: the Engine moves the ship along the route (offline it runs at full speed: travelMul).
   travelStep(s, dt * (opts.travelMul ?? 1), power, events);
+
+  // Auto-Winch: every idle, powered beam touching a powered winch fires as soon as the Bay has room.
+  autoWinch(s, power);
+
+  // Job Board: output average, refills, new jobs.
+  jobsStep(s, dt, events, opts.trackRate !== false);
   return { state: s, events };
+}
+
+/** Beams (Tractor or Grapple) that touch a powered Auto-Winch. Pure. */
+export function winchedBeams(s: GameState, power: PowerInfo = evaluatePower(s)): Set<number> {
+  const winches = s.ship.modules.filter((m) => m.defId === 'winch' && power.powered.has(m.uid)).map((m) => m.cell);
+  const out = new Set<number>();
+  if (!winches.length) return out;
+  const near = new Set<string>();
+  for (const w of winches) {
+    const [x, y] = w.split(',').map(Number);
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) near.add(`${x + dx},${y + dy}`);
+  }
+  for (const m of s.ship.modules) if ((m.defId === 'beam' || m.defId === 'grapple') && near.has(m.cell)) out.add(m.uid);
+  return out;
+}
+
+function autoWinch(s: GameState, power: PowerInfo): void {
+  const winched = winchedBeams(s, power);
+  if (!winched.size) return;
+  for (const b of s.beams) {
+    if (!winched.has(b.uid) || !beamReady(s, b, power) || bayRoom(s) <= 0) continue;
+    b.status = 'counting';
+    b.remaining = beamCountdown(b, power.boosted.has(b.uid));
+  }
 }
 
 // ---- hand crushing -------------------------------------------------------------
@@ -273,6 +309,8 @@ function applyHit(s: GameState, nx: number, ny: number, kind: HitKind, events: G
     let shard = false;
     s.items.ore += rock.ore;
     s.items.ice += rock.ice ?? 0;
+    noteMade(s, 'ore', rock.ore);
+    noteMade(s, 'ice', rock.ice ?? 0);
     s.stats.rocks += 1;
     if (rock.geode) {
       s.stats.geodes += 1;

@@ -1,5 +1,6 @@
 import { MODULES } from '../data/modules';
 import { SOLAR } from '../data/power';
+import { initialJobs } from './jobs';
 import { evaluatePower } from './power';
 import { SAVE_VERSION, createInitialState } from './state';
 import type { BeamState, GameState, Rock } from './types';
@@ -125,6 +126,10 @@ export function parseSave(raw: string | null): { ok: true; state: GameState } | 
         }
       }
       cur = next;
+    }
+    if (cur.version < 9) {
+      // v8 -> v9 (Day 9): the Job Board. It opens on the next tick if the ship already has its second beam.
+      cur = { ...cur, jobs: cur.jobs ?? initialJobs(((cur.rng ?? 1) ^ 0x5eed) >>> 0), version: 9 };
     }
     return { ok: true, state: { ...createInitialState(), ...cur } as GameState };
   } catch {

@@ -5,7 +5,7 @@ import { cellKey, nextTileCost, parseKey, unlockableCells } from '../core/hull';
 import {
   bayRoom, beamCountdown, beamLevels, beamReady, canSend, handStats, holdCrush, nextBeamUpgrade, nextHandUpgrade, nextModuleUpgrade, nextSmasherUpgrade, nextSmelterUpgrade,
   releaseHold, repairSmasher, sellAll, sellSelected, sellQty, sellSurplus, sendToSmasher, setHoldForGoal, smasherQueueCap, smasherQueued, tapAllBeams, tapBeam, tapCrush, tick,
-  toggleSmelter, upgradeBeam, upgradeHand, upgradeModule, upgradeSmasher, upgradeSmelter, weakActive,
+  toggleSmelter, upgradeBeam, upgradeHand, upgradeModule, upgradeSmasher, upgradeSmelter, weakActive, winchedBeams,
 } from '../core/loop';
 import { fitsPlacement, freeCells, freeCellsFor, moduleCost, moduleCount, moduleUnlocked, placeModule, placementOf } from '../core/modules';
 import { evaluatePower, solarLevel, type PowerInfo } from '../core/power';
@@ -29,7 +29,11 @@ import { HAND } from '../data/hand';
 import { HELP } from '../data/help';
 import { SMASHER } from '../data/smasher';
 import { HULLS } from '../data/hulls';
-import { drawHullExterior } from './hullArt';
+import { drawHullExterior, GOLD_TRIM } from './hullArt';
+import {
+  baySize, canDeliver, canSkip, deliverJob, finishableJobs, JOB_ITEMS, rank, repToNext, skipJob, slotKinds, stillNeeds,
+} from '../core/jobs';
+import { RANK, RANKS } from '../data/jobs';
 import { C, FONT, T } from './palette';
 import {
   arrowsFor, boundsOf, CELL, clampPan, localPos, panLimits, panToShow, toScreen, VIEW, ZOOM,
@@ -52,8 +56,9 @@ const PAN_SPEED = 420; // px per second while an arrow is held
 const MAX_GHOSTS = 4;
 const STAGE = { x: 16, y: 466, w: CW, h: 184, cx: W / 2, cy: 556, r: 60 };
 const STRIP_Y = 660;
-/** The Bay: three slots at the right of the status strip. */
-const BAY = { x: W - 146, y: STRIP_Y + 3, size: 34, gap: 8 };
+/** The Bay: its slots sit at the right of the status strip (3, or 4 from the Hauler rank). */
+const BAY = { y: STRIP_Y + 3, size: 34, gap: 8 };
+const bayX = (n: number): number => W - 28 - n * BAY.size - (n - 1) * BAY.gap;
 const ACTION = { y: 706, h: 46 };
 /** Fire takes about 60% of the action row, Sell the rest. */
 const FIRE = { x: 16, w: Math.round((CW - 12) * 0.607) };
@@ -72,8 +77,8 @@ const ROCK_LOOK: Record<Rock['kind'], { outer: number; inner: number; bay: numbe
   ice: { outer: 0x6fa9c9, inner: 0xbfe6ff, bay: 0x9fd8ff },
   heavy: { outer: 0x5d5560, inner: 0x7d7480, bay: 0x6d6470 },
 };
-/** Tab bar: Ship · Build · Map. */
-const TAB_X = { ship: W / 6, build: W / 2, map: (W * 5) / 6 };
+/** Tab bar: Ship · Build · Map · Jobs. */
+const TAB_X = { ship: W / 8, build: (W * 3) / 8, map: (W * 5) / 8, jobs: (W * 7) / 8 };
 /** Map refresh while cruising, seconds. */
 const MAP_REFRESH = 1;
 
@@ -100,7 +105,8 @@ type SheetRow =
       t: 'cargo'; item: ItemId; count: number; price: number; note: string; sellLabel: string; canSell: boolean;
       forSale: boolean; ticked: boolean; onTick: () => void; onSell: () => void; onSellOne: () => void;
     }
-  | { t: 'card'; title: string; sub: string; verb: string; cost: string; can: boolean; fn: () => void };
+  | { t: 'card'; title: string; sub: string; verb: string; cost: string; can: boolean; fn: () => void }
+  | { t: 'job'; title: string; sub: string; verb: string; can: boolean; fn: () => void; skip: string; canSkip: boolean; onSkip: () => void };
 
 export class ShipScene extends Phaser.Scene {
   private state!: GameState;
@@ -187,7 +193,8 @@ export class ShipScene extends Phaser.Scene {
     }
     // the Map shows a live ETA while cruising
     this.mapTimer += dt;
-    if (this.sheetKind === 'map' && this.mapTimer >= MAP_REFRESH && inTransit(this.state)) {
+    const fingerDown = this.input.pointer1?.isDown || this.input.activePointer.isDown; // never rebuild under a tap
+    if (this.mapTimer >= MAP_REFRESH && !fingerDown && ((this.sheetKind === 'map' && inTransit(this.state)) || this.sheetKind === 'jobs')) {
       this.mapTimer = 0;
       this.refreshSheet();
     }
@@ -197,7 +204,8 @@ export class ShipScene extends Phaser.Scene {
 
   /** Static layer (HUD numbers, goal chip) only needs a rebuild when Ore or credits change. */
   private afterEvents(events: GameEvent[]): void {
-    if (events.some((e) => e.kind === 'crushed' || e.kind === 'smashed' || e.kind === 'smelted' || e.kind === 'arrived')) this.redraw();
+    if (events.some((e) => e.kind === 'crushed' || e.kind === 'smashed' || e.kind === 'smelted' || e.kind === 'arrived' || e.kind === 'job_posted' || e.kind === 'jobs_open')) this.redraw();
+    if (events.some((e) => e.kind === 'jobs_open')) this.showToast('New: the Job Board. Open the Jobs tab.');
     const arrived = events.find((e) => e.kind === 'arrived');
     if (arrived && arrived.kind === 'arrived') {
       this.persist();
@@ -432,7 +440,8 @@ export class ShipScene extends Phaser.Scene {
     const g = this.add.graphics();
     this.layer.add(g);
     const finished = new Set(HULLS[this.state.ship.hullId].template.map((c) => `${toScreen(c).col},${toScreen(c).row}`));
-    drawHullExterior(g, owned, finished, new Set(this.ghostCells().map((c) => `${toScreen(c).col},${toScreen(c).row}`)));
+    const trim = rank(this.state) >= RANK.partner ? GOLD_TRIM : undefined;
+    drawHullExterior(g, owned, finished, new Set(this.ghostCells().map((c) => `${toScreen(c).col},${toScreen(c).row}`)), trim);
     for (const c of owned) {
       const { x, y } = this.px(c);
       g.fillStyle(C.deck, 1).fillRoundedRect(x + 2, y + 2, TILE - 4, TILE - 4, 8);
@@ -467,6 +476,9 @@ export class ShipScene extends Phaser.Scene {
       } else if (m.defId === 'engine') {
         this.placeholder(owned, c, ENGINE_COLOR, 'Engine');
         hitZone(c, () => (moving ? this.cancelMove() : this.showEngineSheet(m.uid)));
+      } else if (m.defId === 'winch') {
+        this.placeholder(owned, c, 0x8a6a2a, 'Winch');
+        hitZone(c, () => (moving ? this.cancelMove() : this.showWinchSheet(m.uid)));
       } else if (m.defId === 'smasher') {
         const rusty = !this.state.smashers.find((u) => u.uid === m.uid)?.repaired;
         this.placeholder(owned, c, rusty ? 0x6b5648 : C.crusher, rusty ? 'Rusty' : 'Smash');
@@ -640,17 +652,20 @@ export class ShipScene extends Phaser.Scene {
     this.hud.add(bar);
     const workshop = this.sheetKind === 'workshop';
     const map = this.sheetKind === 'map';
+    const jobs = this.sheetKind === 'jobs';
     const dot = (cx: number) => {
       const d = this.add.graphics();
       d.fillStyle(C.space, 1).fillCircle(cx + 20, H - 68, 9);
       d.fillStyle(C.crit, 1).fillCircle(cx + 20, H - 68, 6.5);
       this.hud.add(d);
     };
-    tab(TAB_X.ship, 'Ship', !workshop && !map);
+    tab(TAB_X.ship, 'Ship', !workshop && !map && !jobs);
     tab(TAB_X.build, 'Build', workshop);
     tab(TAB_X.map, 'Map', map);
+    tab(TAB_X.jobs, 'Jobs', jobs);
     if (!workshop && readyUpgrades(this.state) > 0) dot(TAB_X.build);
     if (!map && canDepart(this.state).ok) dot(TAB_X.map);
+    if (!jobs && finishableJobs(this.state) > 0) dot(TAB_X.jobs);
   }
 
   private showToast(msg: string): void {
@@ -799,7 +814,7 @@ export class ShipScene extends Phaser.Scene {
       }
       const a = this.txt(X, 0, row.title, { fontFamily: FONT, fontSize: '17px', fontStyle: '600', color: T.text, wordWrap: { width: TXT_W } });
       const b = this.txt(X, 0, row.sub, { fontFamily: FONT, fontSize: '13px', color: T.dim, wordWrap: { width: TXT_W } });
-      return { row, a, b, h: Math.max(68, a.height + b.height + 20) };
+      return { row, a, b, h: Math.max(row.t === 'job' ? 104 : 68, a.height + b.height + 20) };
     });
     const bodyH = laid.reduce((n, l) => n + l.h, 0);
     const panelH = Math.min(BOTTOM - 110, HEAD + bodyH + 16 + FOOT);
@@ -982,6 +997,28 @@ export class ShipScene extends Phaser.Scene {
         z.on('pointerup', (p: Phaser.Input.Pointer) => { if (tapOk(p)) row.fn(); });
         zones.push({ z, top: y + 8, bottom: y + 60 });
         body.add([g, lab, z]);
+      } else if (l.row.t === 'job') {
+        // a job card: Deliver (big) with a small Skip under it
+        const row = l.row;
+        l.a!.setY(y + 6);
+        l.b!.setY(y + 6 + l.a!.height + 2);
+        const bx = X + WID - BTN_W, by = y + 8;
+        const g = this.add.graphics();
+        g.fillStyle(row.can ? C.crit : C.panelEdge, 1).fillRoundedRect(bx, by, BTN_W, 48, 16);
+        g.lineStyle(1, C.panelEdge, 1).lineBetween(X, y + l.h - 1, X + WID, y + l.h - 1);
+        const verb = this.txt(bx + BTN_W / 2, by + 24, row.verb, { fontFamily: FONT, fontSize: '16px', fontStyle: '600', color: row.can ? '#0B1020' : T.dim, align: 'center', wordWrap: { width: BTN_W - 10 } }).setOrigin(0.5);
+        const skip = this.txt(bx + BTN_W / 2, by + 68, row.skip, { fontFamily: FONT, fontSize: '13px', color: row.canSkip ? T.text : '#6F7FA8' }).setOrigin(0.5);
+        if (row.canSkip) g.lineStyle(2, C.ghost, 1).strokeRoundedRect(bx + 18, by + 54, BTN_W - 36, 28, 14);
+        body.add([g, l.a!, l.b!, verb, skip]);
+        const z = this.add.zone(bx + BTN_W / 2, by + 24, BTN_W, 48).setInteractive();
+        z.on('pointerdown', begin);
+        z.on('pointerup', (p: Phaser.Input.Pointer) => { if (tapOk(p)) row.fn(); });
+        zones.push({ z, top: by, bottom: by + 48 });
+        const sz = this.add.zone(bx + BTN_W / 2, by + 68, BTN_W - 20, 32).setInteractive();
+        sz.on('pointerdown', begin);
+        sz.on('pointerup', (p: Phaser.Input.Pointer) => { if (tapOk(p) && row.canSkip) row.onSkip(); });
+        zones.push({ z: sz, top: by + 52, bottom: by + 84 });
+        body.add([z, sz]);
       } else {
         const row = l.row;
         l.a!.setY(y + 6);
@@ -1131,6 +1168,7 @@ export class ShipScene extends Phaser.Scene {
         { id: 'solar', sub: `Makes ${SOLAR.levels[0].output} power for modules up to ${SOLAR.levels[0].reach} tiles away. Anything touching it works 15% faster.` },
         { id: 'engine', sub: 'Flies the ship to new fields on the Map. Your beams keep working while you cruise.' },
         { id: 'grapple', sub: `A slow beam (${GRAPPLE.countdown}s) that pulls one big rock. Here and further on: Heavy rocks full of Ore and Ice.` },
+        { id: 'winch', sub: 'Fires every beam it touches as soon as the Bay has room, even while you are busy. Put it next to your beams.' },
       ];
       const placeHelp: Record<string, string> = {
         edge: 'Needs an outside tile, one with a side facing open space.',
@@ -1212,6 +1250,23 @@ export class ShipScene extends Phaser.Scene {
     });
   }
 
+  /** Auto-Winch tile: what it does, which beams it is touching, move, sell. */
+  private showWinchSheet(uid: number): void {
+    this.sellArm = null;
+    this.showSheet(`winch:${uid}`, () => {
+      const st = this.state;
+      const n = winchedBeams(st).size;
+      const live = evaluatePower(st).powered.has(uid);
+      return {
+        title: 'Auto-Winch',
+        rows: [
+          { t: 'text', text: `Fires every beam touching it as soon as the Bay has room. ${n > 0 ? `It is working ${n} beam${n > 1 ? 's' : ''} now.` : 'It touches no beam yet: Move it next to one.'}${live ? '' : ' It has no power.'}`, color: n > 0 && live ? T.text : T.coral },
+          ...this.moveSellRows(uid),
+        ],
+      };
+    });
+  }
+
   /** Engine tile: speed, Depart, upgrade, move, sell. */
   private showEngineSheet(uid: number): void {
     this.sellArm = null;
@@ -1253,6 +1308,94 @@ export class ShipScene extends Phaser.Scene {
         this.showToast(`Under way to ${next.name}`);
       },
     };
+  }
+
+  /** "50 Ore (20 in) · 10 Plate" for a job card. */
+  private jobWants(job: NonNullable<GameState['jobs']['slots'][number]>): string {
+    return JOB_ITEMS.filter((i) => (job.wants[i] ?? 0) > 0).map((i) => {
+      const want = job.wants[i]!, got = job.delivered[i] ?? 0;
+      return `${fmtNum(want)} ${ITEM_LOOK[i].name}${got > 0 ? ` (${fmtNum(got)} in)` : ''}`;
+    }).join(' · ');
+  }
+
+  /** Jobs tab: rank, the job cards (Deliver / Skip), and what each rank unlocks. */
+  private showJobs(): void {
+    this.mapTimer = 0;
+    this.showSheet('jobs', () => {
+      const st = this.state;
+      const rows: SheetRow[] = [];
+      if (!st.jobs.unlocked) {
+        rows.push({ t: 'text', text: 'The Job Board opens when your ship has a second Tractor Beam. Jobs ask for materials, pay more than selling, and earn Reputation.', color: T.text });
+        return { title: 'Jobs', rows };
+      }
+      const r = rank(st);
+      const toNext = repToNext(st);
+      const next = RANKS[r + 1];
+      rows.push({ t: 'heading', text: `${RANKS[r].name} · ${st.jobs.rep} Rep` });
+      rows.push({ t: 'text', text: next ? `${toNext} more Rep to ${next.name}: ${next.perk}.` : 'Top rank. The fleet knows your name.' });
+      const label: Record<string, string> = { quick: 'Quick job', standard: 'Job', local: 'Local job' };
+      slotKinds(st).forEach((kind, i) => {
+        const job = st.jobs.slots[i];
+        if (!job) {
+          const wait = st.jobs.refill[i] ?? 0;
+          const text = kind === 'local' && inTransit(st)
+            ? 'Local job: park at a field to see what it needs.'
+            : `${label[kind]}: a new one is posted in ${this.clock(wait)}.`;
+          rows.push({ t: 'text', text, color: '#6F7FA8' });
+          return;
+        }
+        const chk = canDeliver(st, i);
+        const where = job.node !== undefined ? ` · only at ${ROUTE[job.node].name}` : '';
+        const skipCd = st.jobs.skipCd[i] ?? 0;
+        rows.push({
+          t: 'job',
+          title: `${label[kind]} · ${job.client}`,
+          sub: `Wants ${this.jobWants(job)}${where}\nPays ${fmtNum(job.credits)} credits + ${job.rep} Rep`,
+          verb: chk.ok ? (chk.completes ? 'Finish' : 'Hand over') : chk.label,
+          can: chk.ok,
+          fn: () => {
+            const out = deliverJob(this.state, i);
+            if (out.state === this.state) return;
+            this.apply(out.state);
+            this.handleEvents(out.events, W / 2, VIEW.y + 40);
+            if (!out.events.some((e) => e.kind === 'job_done')) {
+              const left = JOB_ITEMS.filter((it) => stillNeeds(out.state.jobs.slots[i]!, it) > 0).length;
+              this.showToast(left ? 'Handed over. Bring the rest later.' : 'Handed over');
+            }
+            if (!out.events.some((e) => e.kind === 'rank_up')) this.refreshSheet();
+          },
+          skip: canSkip(st, i) ? 'Skip' : `Skip in ${this.clock(skipCd)}`,
+          canSkip: canSkip(st, i),
+          onSkip: () => {
+            const out = skipJob(this.state, i);
+            if (out.state === this.state) return;
+            this.apply(out.state);
+            this.refreshSheet();
+          },
+        });
+      });
+      rows.push({ t: 'text', text: 'Hand over part of a job now and the rest later; what you hand over is kept safe in the job. A finished slot gets a new job after 10 minutes of play. Skip swaps a job (anything handed in comes back).' });
+      rows.push({ t: 'heading', text: 'Reputation ranks' });
+      RANKS.forEach((k, i) => {
+        if (i === 0) return;
+        rows.push({ t: 'text', text: `${k.name} (${k.rep} Rep)${i <= r ? ' · reached' : ''}\n${k.perk}`, color: i <= r ? T.gold : T.dim });
+      });
+      return { title: 'Jobs', rows };
+    });
+  }
+
+  /** A short celebration when a rank is reached. */
+  private showRankUp(r: number): void {
+    const k = RANKS[r];
+    this.showSheet('rank', () => ({
+      title: `New rank: ${k.name}`,
+      rows: [
+        { t: 'text', text: `${k.perk}.`, color: T.gold },
+        ...(r === RANK.winch ? [{ t: 'text' as const, text: 'Build it on an Open tile next to your beams. It fires them for you as soon as the Bay has room.' }] : []),
+        ...(r === RANK.bay ? [{ t: 'text' as const, text: 'Fire one more rock into the Bay before it fills.' }] : []),
+        { t: 'button', label: 'Back to the board', fn: () => this.showJobs() },
+      ],
+    }));
   }
 
   /** Map tab: the route through the system, where the ship is, and Depart. */
@@ -1608,10 +1751,18 @@ export class ShipScene extends Phaser.Scene {
             this.floatAtModule('smasher', 0, 'To Smasher', T.dim);
           } else {
             // pop over the Bay slot the rock landed in
-            const slot = Math.max(0, Math.min(this.state.bay.length, BAL.baySlots) - 1);
-            this.chips(BAY.x + slot * (BAY.size + BAY.gap) + BAY.size / 2, BAY.y + BAY.size / 2, C.beam, 8);
-            this.floatText(BAY.x + (BAY.size * 3 + BAY.gap * 2) / 2, BAY.y - 8, `+1 Bay`, T.dim);
+            const n = baySize(this.state);
+            const slot = Math.max(0, Math.min(this.state.bay.length, n) - 1);
+            this.chips(bayX(n) + slot * (BAY.size + BAY.gap) + BAY.size / 2, BAY.y + BAY.size / 2, C.beam, 8);
+            this.floatText(bayX(n) + (BAY.size * n + BAY.gap * (n - 1)) / 2, BAY.y - 8, `+1 Bay`, T.dim);
           }
+          break;
+        case 'job_done':
+          this.floatText(80, 70, `+${fmtNum(e.credits)}`, T.gold);
+          this.showToast(`Job done! +${e.rep} Rep`);
+          break;
+        case 'rank_up':
+          this.showRankUp(e.rank);
           break;
         case 'sent':
           this.chips(STAGE.cx, STAGE.cy, C.crusher, 10);
@@ -1663,13 +1814,15 @@ export class ShipScene extends Phaser.Scene {
     send.on('pointerdown', () => this.onSend());
     const fire = this.add.zone(FIRE.x + FIRE.w / 2, ACTION.y + ACTION.h / 2, FIRE.w, ACTION.h).setInteractive();
     fire.on('pointerdown', () => this.onFire());
-    const tabW = W / 3 - 4;
+    const tabW = W / 4 - 4;
     const tabShip = this.add.zone(TAB_X.ship, H - 42, tabW, 80).setInteractive().setDepth(31);
     tabShip.on('pointerdown', () => this.closeSheet());
     const tabBuild = this.add.zone(TAB_X.build, H - 42, tabW, 80).setInteractive().setDepth(31);
     tabBuild.on('pointerdown', () => (this.sheetKind === 'workshop' ? this.closeSheet() : this.showWorkshop()));
     const tabMap = this.add.zone(TAB_X.map, H - 42, tabW, 80).setInteractive().setDepth(31);
     tabMap.on('pointerdown', () => (this.sheetKind === 'map' ? this.closeSheet() : this.showMap()));
+    const tabJobs = this.add.zone(TAB_X.jobs, H - 42, tabW, 80).setInteractive().setDepth(31);
+    tabJobs.on('pointerdown', () => (this.sheetKind === 'jobs' ? this.closeSheet() : this.showJobs()));
     const gearZ = this.add.zone(W - 38, 88, 48, 48).setInteractive();
     gearZ.on('pointerdown', () => (this.sheetKind === 'menu' ? this.closeSheet() : this.showMenu()));
     const sellZ = this.add.zone(SELL.x + SELL.w / 2, ACTION.y + ACTION.h / 2, SELL.w, ACTION.h).setInteractive();
@@ -1889,19 +2042,20 @@ export class ShipScene extends Phaser.Scene {
 
     // --- status strip: heat + Bay
     const heatFrac = Math.min(1, c.heat / hand.heatMax);
-    const hx = 16, hy = STRIP_Y + 18, hw = BAY.x - 16 - 52;
+    const nBay = baySize(st), BX = bayX(nBay);
+    const hx = 16, hy = STRIP_Y + 18, hw = BX - 16 - 52;
     g.fillStyle(C.deck, 1).fillRoundedRect(hx, hy, hw, 16, 8);
     const hc = c.lockout > 0 ? 0x9fd8ff : this.heatColor(heatFrac);
     if (heatFrac > 0) g.fillStyle(hc, 1).fillRoundedRect(hx, hy, Math.max(16, hw * heatFrac), 16, 8);
     this.setText(this.tx.heat, hx + 18, STRIP_Y + 8, 'Heat');
-    const bayFull = st.bay.length >= BAL.baySlots;
-    this.setText(this.tx.bay, BAY.x - 26, STRIP_Y + 21, `Bay\n${st.bay.length}/${BAL.baySlots}`, bayFull ? T.gold : T.dim);
+    const bayFull = st.bay.length >= nBay;
+    this.setText(this.tx.bay, BX - 26, STRIP_Y + 21, `Bay\n${st.bay.length}/${nBay}`, bayFull ? T.gold : T.dim);
     const flying = st.beams
       .filter((b) => b.status !== 'idle')
       .map((b) => (b.status === 'blocked' ? 1 : Math.min(1, 1 - b.remaining / beamCountdown(b, power.boosted.has(b.uid)))))
       .sort((a, b) => b - a); // the rock that lands first takes the first free slot
-    for (let i = 0; i < BAL.baySlots; i++) {
-      const sx = BAY.x + i * (BAY.size + BAY.gap), sy = BAY.y, mid = BAY.size / 2;
+    for (let i = 0; i < nBay; i++) {
+      const sx = BX + i * (BAY.size + BAY.gap), sy = BAY.y, mid = BAY.size / 2;
       g.fillStyle(C.deck, 1).fillRoundedRect(sx, sy, BAY.size, BAY.size, 10);
       g.lineStyle(2, C.deckEdge, 1).strokeRoundedRect(sx, sy, BAY.size, BAY.size, 10);
       const rock = st.bay[i];
@@ -1930,7 +2084,7 @@ export class ShipScene extends Phaser.Scene {
     const wait = Math.max(0, ...st.beams.filter((b) => b.status === 'counting').map((b) => b.remaining));
     const fireText = canFire
       ? (fireN > 1 ? `Fire ${fireN} beams` : 'Fire beam')
-      : counting ? `Incoming ${wait.toFixed(1)}s` : dark && room > 0 ? 'No power' : `Bay full ${st.bay.length}/${BAL.baySlots}`;
+      : counting ? `Incoming ${wait.toFixed(1)}s` : dark && room > 0 ? 'No power' : `Bay full ${st.bay.length}/${nBay}`;
     this.setText(this.tx.fire, FIRE.x + FIRE.w / 2, ACTION.y + ACTION.h / 2, fireText, canFire ? '#0B1020' : T.dim);
 
     const val = sellValue(st);

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { canSend, sendToSmasher, smasherQueueCap, smasherQueued, tick, upgradeSmasher, upgradeSmelter } from '../src/core/loop';
 import { moduleCost, placeModule } from '../src/core/modules';
 import { parseSave } from '../src/core/save';
-import { createInitialState } from '../src/core/state';
+import { createInitialState, SAVE_VERSION } from '../src/core/state';
 import type { GameState, Rock } from '../src/core/types';
 import { moveModule, sellModule, sellRefund } from '../src/core/units';
 import { MODULES, SELL_REFUND } from '../src/data/modules';
@@ -192,7 +192,7 @@ describe('save v6 -> v7', () => {
     const parsed = parseSave(JSON.stringify(v6));
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.state.version).toBe(8);
+    expect(parsed.state.version).toBe(SAVE_VERSION);
     expect(parsed.state.smashers).toEqual([{ uid: 2, paid: { credits: 0 }, repaired: true, level: 3, queue: [dust()] }]);
     expect(parsed.state.smelters).toEqual([{ uid: 3, paid: { credits: 0, items: { ore: 25 } }, level: 2, on: false, progress: 0.5 }]);
     expect('smasher' in parsed.state).toBe(false);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyOffline, effectiveSeconds, stamp } from '../src/core/offline';
 import { deserialize, serialize } from '../src/core/save';
-import { createInitialState } from '../src/core/state';
+import { createInitialState, SAVE_VERSION } from '../src/core/state';
 import type { GameState, Rock } from '../src/core/types';
 import { OFFLINE } from '../src/data/offline';
 
@@ -118,7 +118,7 @@ describe('save v4 -> v7', () => {
     const v4 = { ...createInitialState(), version: 4, savedAt: undefined } as unknown as Record<string, unknown>;
     delete v4.savedAt;
     const s = deserialize(JSON.stringify(v4));
-    expect(s.version).toBe(8);
+    expect(s.version).toBe(SAVE_VERSION);
     expect(s.savedAt).toBe(0);
     expect(deserialize(serialize(s))).toEqual(s);
     expect(deserialize(serialize(stamp(s, T0))).savedAt).toBe(T0);

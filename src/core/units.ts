@@ -55,6 +55,8 @@ export function sellRefund(s: GameState, uid: number): Cost | null {
     paid = unit.paid;
     level = unit.level;
     levels = mod.defId === 'smelter' ? SMELTER.levels : SMASHER.levels;
+  } else if (mod.defId === 'winch') {
+    paid = mod.paid;
   } else if (mod.defId === 'solar' || mod.defId === 'engine') {
     if (mod.defId === 'engine' && s.travel.dest !== null) return null; // not mid-cruise
     paid = mod.paid;

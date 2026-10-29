@@ -8,7 +8,7 @@ export const POWER = {
   /** Power the hull core supplies to any module, anywhere (used after the Solar Wings hand out theirs). */
   hullBase: 3,
   /** What each module draws while it is working. A Rusty Smasher or a Smelter switched OFF draws nothing. */
-  draw: { beam: 1, grapple: 1, smasher: 1, smelter: 1, engine: 2, solar: 0 } as Record<ModuleId, number>,
+  draw: { beam: 1, grapple: 1, smasher: 1, smelter: 1, engine: 2, solar: 0, winch: 1 } as Record<ModuleId, number>,
   /** Boost: a powered module touching a Solar Wing works 15% faster (one Boost per module). */
   boost: 1.15,
 } as const;

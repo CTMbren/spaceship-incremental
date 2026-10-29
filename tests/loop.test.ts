@@ -3,7 +3,7 @@ import { currentGoal } from '../src/core/goals';
 import { sell, tapBeam, tapCrush, tick, weakActive } from '../src/core/loop';
 import { nextRandom } from '../src/core/rng';
 import { deserialize } from '../src/core/save';
-import { createInitialState } from '../src/core/state';
+import { createInitialState, SAVE_VERSION } from '../src/core/state';
 import type { GameState } from '../src/core/types';
 import { BAL } from '../src/data/balance';
 
@@ -196,7 +196,7 @@ describe('save migration', () => {
       ship: { hullId: 'tug', ownedCells: ['2,0', '2,1', '2,2', '1,2'] },
     });
     const s = deserialize(v1);
-    expect(s.version).toBe(8);
+    expect(s.version).toBe(SAVE_VERSION);
     expect(s.credits).toBe(321);
     expect(s.items.ore).toBe(5);
     expect(s.items.ice).toBe(0);

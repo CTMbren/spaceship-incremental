@@ -1,6 +1,8 @@
 import { MODULES } from '../data/modules';
 import { canAfford } from './actions';
 import { parseKey } from './hull';
+import { RANK } from '../data/jobs';
+import { rank } from './jobs';
 import { hasVisited } from './travel';
 import type { Cost, GameState, GameEvent, ItemId, ModuleId } from './types';
 
@@ -57,6 +59,7 @@ export function moduleUnlocked(s: GameState, id: ModuleId): boolean {
   if (id === 'solar') return s.smelters.length > 0 || s.stats.smelted > 0;
   if (id === 'engine') return s.beams.filter((b) => b.kind === 'tractor').length >= 2;
   if (id === 'grapple') return hasVisited(s, 'belt');
+  if (id === 'winch') return rank(s) >= RANK.winch;
   return true;
 }
 
@@ -92,7 +95,7 @@ export function placeModule(state: GameState, id: ModuleId, cell: string): Place
   s.credits -= cost.credits;
   for (const [k, v] of Object.entries(cost.items ?? {})) s.items[k as ItemId] -= v ?? 0;
   const uid = Math.max(0, ...s.ship.modules.map((m) => m.uid)) + 1;
-  const own = id === 'solar' || id === 'engine' || id === 'grapple';
+  const own = id === 'solar' || id === 'engine' || id === 'grapple' || id === 'winch';
   s.ship.modules.push({ uid, defId: id, cell, ...(own ? { paid: cost } : {}), ...(id === 'solar' || id === 'engine' ? { level: 1 } : {}) });
   if (id === 'beam') s.beams.push({ uid, kind: 'tractor', status: 'idle', remaining: 0, level: 1 });
   if (id === 'grapple') s.beams.push({ uid, kind: 'grapple', status: 'idle', remaining: 0, level: 1 });

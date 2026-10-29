@@ -26,6 +26,11 @@ describe('economy pacing (headless bot)', () => {
     expect(casual.milestones.repaired!).toBeLessThan(5 * 60);
     expect(casual.final.stats.smashed).toBeGreaterThan(20);
   });
+  it('a casual player who uses the Job Board reaches Hauler in about a quarter of an hour', () => {
+    const m = runSim('casual', 30).milestones;
+    expect(m.hauler!).toBeGreaterThan(8 * 60);
+    expect(m.hauler!).toBeLessThan(25 * 60);
+  });
   it('the bot is deterministic', () => {
     expect(runSim('engaged', 5).final).toEqual(runSim('engaged', 5).final);
   });

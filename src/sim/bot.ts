@@ -13,6 +13,8 @@ import {
 import { freeCells, freeCellsFor, moduleCost, moduleCount, moduleUnlocked, placeModule } from '../core/modules';
 import { sparePower } from '../core/power';
 import { canDepart, depart, hasVisited, inTransit } from '../core/travel';
+import { canDeliver, deliverJob, rank } from '../core/jobs';
+import { RANK } from '../data/jobs';
 import { POWER } from '../data/power';
 import type { ModuleId } from '../core/types';
 import { SELLABLE, sellValue } from '../core/reserve';
@@ -34,6 +36,9 @@ export interface Milestones {
   belt?: number;
   grapple?: number;
   rings?: number;
+  hauler?: number;
+  salvager?: number;
+  contractor?: number;
   /** tiles owned -> seconds when reached */
   tiles: Record<number, number>;
 }
@@ -104,6 +109,11 @@ function spend(s0: GameState): GameState {
         const next = placeWithPower(s, want);
         if (next) { s = travel(next); continue; }
       }
+    }
+    // the Auto-Winch next to a beam once the Contractor rank allows it
+    if (moduleCount(s, 'winch') === 0 && rank(s) >= RANK.winch) {
+      const next = placeWithPower(s, 'winch');
+      if (next) { s = next; continue; }
     }
     // tiles beat upgrades whenever affordable
     const next = unlockableCells(def, new Set(s.ship.ownedCells))[0];
@@ -182,6 +192,8 @@ export function runSim(policy: Policy, minutes: number, seed = 1): SimResult {
     }
     if (present && sinceSpend >= SPEND[policy]) {
       sinceSpend = 0;
+      // jobs first: hand over what it holds (partial delivery), then sell what is left
+      for (let i = 0; i < s.jobs.slots.length; i++) if (canDeliver(s, i).ok) s = deliverJob(s, i).state;
       // while saving Plate for the next Smasher copy the bot keeps its Plate and the Ore the Smelter turns into it
       const need = moduleCost(s, 'smasher')?.items?.plate ?? 0;
       const saving = s.ship.ownedCells.length >= HULL_END && moduleCount(s, 'engine') > 0 && smasherReady(s) && s.smashers.length < 3 && freeCells(s).length > 0;
@@ -203,6 +215,9 @@ export function runSim(policy: Policy, minutes: number, seed = 1): SimResult {
     if (ms.belt === undefined && hasVisited(s, 'belt')) ms.belt = t;
     if (ms.grapple === undefined && moduleCount(s, 'grapple') > 0) ms.grapple = t;
     if (ms.rings === undefined && hasVisited(s, 'rings')) ms.rings = t;
+    if (ms.hauler === undefined && rank(s) >= RANK.bay) ms.hauler = t;
+    if (ms.salvager === undefined && rank(s) >= RANK.slot) ms.salvager = t;
+    if (ms.contractor === undefined && rank(s) >= RANK.winch) ms.contractor = t;
     const n = s.ship.ownedCells.length;
     if (ms.tiles[n] === undefined) ms.tiles[n] = t;
   }

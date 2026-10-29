@@ -84,7 +84,7 @@ function fastForward(start: GameState, segs: Segment[]): { state: GameState; arr
   const arrived: number[] = [];
   for (const seg of segs) {
     const effective = seg.realSec * seg.rate;
-    const opts = { travelMul: 1 / seg.rate, smelt: seg.smelt };
+    const opts = { travelMul: 1 / seg.rate, smelt: seg.smelt, trackRate: false };
     const steps = Math.floor(effective / OFFLINE.stepSec);
     const rest = effective - steps * OFFLINE.stepSec;
     for (let i = 0; i <= steps; i++) {

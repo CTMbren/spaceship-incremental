@@ -5,7 +5,7 @@ import { fmtNum, formatVersion } from '../src/core/format';
 import { bayRoom, sellAll, sellSelected, sellSurplus, setHoldForGoal, tapAllBeams, tapBeam, tick } from '../src/core/loop';
 import { parseSave, serialize } from '../src/core/save';
 import { availableQty, sellValue } from '../src/core/reserve';
-import { createInitialState } from '../src/core/state';
+import { createInitialState, SAVE_VERSION } from '../src/core/state';
 import type { GameState, Rock } from '../src/core/types';
 import { BAL, PRICES } from '../src/data/balance';
 
@@ -153,7 +153,7 @@ describe('save v5 -> v7 and Paste save', () => {
     const r = parseSave(JSON.stringify(v5));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.state.version).toBe(8);
+    expect(r.state.version).toBe(SAVE_VERSION);
     expect(r.state.flags).toEqual({ tappedBeam: true, usedHold: false, holdForGoal: true, powerNotice: 0 });
     const again = parseSave(serialize(r.state));
     expect(again.ok && again.state).toEqual(r.state);

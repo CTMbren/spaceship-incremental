@@ -22,7 +22,7 @@ export interface HullDef {
   tileCosts: Cost[];
 }
 
-export type ModuleId = 'beam' | 'smasher' | 'smelter' | 'solar' | 'engine' | 'grapple';
+export type ModuleId = 'beam' | 'smasher' | 'smelter' | 'solar' | 'engine' | 'grapple' | 'winch';
 
 /** A module sitting on one owned tile (1x1 modules only until footprints arrive). */
 export interface ModuleInstance {
@@ -65,6 +65,38 @@ export interface BeamState {
   remaining: number;
   /** Level 1..4. Tractor: richer rocks. Grapple: shorter countdown. */
   level: number;
+}
+
+/** A job on the Job Board (Day 9): materials wanted, what has been handed over, and the pay. */
+export interface Job {
+  kind: 'quick' | 'standard' | 'local';
+  client: string;
+  /** Local jobs only: the route node where it can be delivered. */
+  node?: number;
+  wants: Partial<Record<ItemId, number>>;
+  delivered: Partial<Record<ItemId, number>>;
+  credits: number;
+  rep: number;
+}
+
+export interface JobsState {
+  unlocked: boolean;
+  /** Reputation earned (ranks are derived from it). */
+  rep: number;
+  /** Highest rank whose one-time gifts were handed out. */
+  rankPaid: number;
+  /** The board's own RNG (mulberry32 state), separate from rocks. */
+  seed: number;
+  slots: (Job | null)[];
+  /** Seconds of play until an empty slot gets a new job. */
+  refill: number[];
+  /** Seconds until each slot's free Skip is back. */
+  skipCd: number[];
+  /** Production per minute (exponential average) that sizes jobs, and the counters it is built from. */
+  rate: Partial<Record<ItemId, number>>;
+  made: Partial<Record<ItemId, number>>;
+  seen: Partial<Record<ItemId, number>>;
+  done: number;
 }
 
 /** Where the ship is on the system route (Day 8). */
@@ -157,6 +189,7 @@ export interface GameState {
    */
   flags: { tappedBeam: boolean; usedHold: boolean; holdForGoal: boolean; powerNotice: number };
   travel: TravelState;
+  jobs: JobsState;
   /** Epoch ms the game was last seen (stamped by the scene when saving); 0 = never. Drives offline catch-up. */
   savedAt: number;
 }
@@ -171,6 +204,11 @@ export type GameEvent =
   | { kind: 'sent' }
   | { kind: 'smashed'; ore: number; ice?: number; uid?: number }
   | { kind: 'departed'; to: number }
+  | { kind: 'jobs_open' }
+  | { kind: 'job_posted'; slot: number }
+  | { kind: 'job_progress'; slot: number }
+  | { kind: 'job_done'; slot: number; credits: number; rep: number }
+  | { kind: 'rank_up'; rank: number }
   | { kind: 'arrived'; node: number }
   | { kind: 'repaired' }
   | { kind: 'smelted'; plate: number; uid?: number }
