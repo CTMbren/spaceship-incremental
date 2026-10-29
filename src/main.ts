@@ -25,4 +25,13 @@ async function start(): Promise<void> {
 }
 
 document.addEventListener('contextmenu', (e) => e.preventDefault());
+// iOS: a two-finger pinch belongs to the ship view (Day 9), never to page zoom; nor does a double-tap.
+for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+document.addEventListener('touchmove', (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+let lastTouchEnd = 0;
+document.addEventListener('touchend', (e) => {
+  const now = Date.now();
+  if (now - lastTouchEnd < 350) e.preventDefault();
+  lastTouchEnd = now;
+}, { passive: false });
 void start();

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { HULL_TUG } from '../src/data/hulls';
 import {
-  arrowsFor, boundsOf, CELL, clampPan, edgeRuns, localPos, panLimits, panToShow, toScreen, VIEW, ZOOM,
+  arrowsFor, boundsOf, CELL, cellAt, clampPan, edgeRuns, fitZoom, localPos, panLimits, panToShow, toScreen, VIEW, ZOOM,
+  ZOOM_MAX, ZOOM_MIN, zoomAbout, zoomRange,
 } from '../src/game/shipLayout';
 
 const start = [{ x: 2, y: 0 }, { x: 2, y: 1 }, { x: 2, y: 2 }];
@@ -64,5 +65,36 @@ describe('silhouette edge runs', () => {
     const runs = edgeRuns(HULL_TUG.template.map(toScreen));
     expect(runs.find((r) => r.side === 'left' && r.line === 0)).toMatchObject({ start: 1, end: 2 });
     expect(runs.filter((r) => r.side === 'top').length).toBeGreaterThan(1);
+  });
+});
+
+describe('pinch zoom and swipe (Day 9)', () => {
+  it('zooming keeps the point under the fingers in place', () => {
+    const pan = { x: 40, y: 150 };
+    const anchor = { x: 200, y: 260 };
+    const after = zoomAbout(pan, 1.5, 2.2, anchor);
+    // the local point under the anchor before and after is the same
+    expect((anchor.x - after.x) / 2.2).toBeCloseTo((anchor.x - pan.x) / 1.5, 9);
+    expect((anchor.y - after.y) / 2.2).toBeCloseTo((anchor.y - pan.y) / 1.5, 9);
+  });
+  it('the zoom range lets a big ship zoom out until it fits (never below 0.6x) and in to 1.6x', () => {
+    const big = { x0: 0, y0: 0, x1: 900, y1: 400 };
+    const r = zoomRange(big);
+    expect(r.max).toBeCloseTo(ZOOM * 1.6, 9);
+    expect(r.min).toBeGreaterThanOrEqual(ZOOM_MIN);
+    expect(r.min).toBeLessThan(ZOOM);
+    expect(r.min).toBeCloseTo(Math.max(ZOOM_MIN, fitZoom(big)), 9);
+    const small = { x0: 0, y0: 0, x1: 100, y1: 100 };
+    expect(zoomRange(small).min).toBe(ZOOM); // already fits: no need to zoom out
+    expect(ZOOM_MAX).toBeGreaterThan(ZOOM);
+  });
+  it('cellAt finds the tile under a finger at any zoom', () => {
+    const c = { x: 2, y: 1 };
+    for (const zoom of [0.8, 1.5, 2.4]) {
+      const pan = { x: 10, y: VIEW.y + 5 };
+      const lp = localPos(c);
+      const wx = pan.x + (lp.x + CELL / 2) * zoom, wy = pan.y + (lp.y + CELL / 2) * zoom;
+      expect(cellAt(pan, zoom, wx, wy)).toEqual(c);
+    }
   });
 });

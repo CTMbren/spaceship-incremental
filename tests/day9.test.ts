@@ -63,7 +63,7 @@ describe('Job Board: opening and job sizes', () => {
     // 30 Ore/min x 8 min x 0.35 = 84 -> 85; 4 Plate/min x 8 x 0.35 = 11.2 -> 12
     expect(job.wants).toMatchObject({ ore: 85, plate: 12 });
     expect(job.credits).toBe(Math.round((85 * 1 + 12 * 8 + (job.wants.ice ?? 0) * 3) * 1.5));
-    expect(job.rep).toBe(3);
+    expect(job.rep).toBe(JOBS.kinds.standard.rep);
   });
   it('sizes follow the player: a faster ship gets bigger jobs, a slow start never drops below 70% of par', () => {
     const base = opened();
@@ -153,7 +153,7 @@ describe('Job Board: delivering', () => {
 
 describe('Reputation ranks', () => {
   const finishWith = (s: GameState, rep: number): ReturnType<typeof deliverJob> => deliverJob(withJob(s, 0, { wants: { ore: 1 }, rep }), 0);
-  it('Hauler (5): the Bay holds 4 rocks', () => {
+  it('Hauler: the Bay holds 4 rocks', () => {
     const s = opened();
     expect(baySize(s)).toBe(BAL.baySlots);
     const out = finishWith(s, RANKS[RANK.bay].rep);
@@ -161,14 +161,14 @@ describe('Reputation ranks', () => {
     expect(baySize(out.state)).toBe(BAL.baySlots + 1);
     expect(bayRoom(out.state)).toBe(BAL.baySlots + 1);
   });
-  it('Salvager (15): a fourth job slot, and jobs pay 10% more', () => {
+  it('Salvager: a fourth job slot, and jobs pay 10% more', () => {
     const s = { ...opened(), jobs: { ...opened().jobs, rep: RANKS[RANK.slot].rep } };
     expect(slotKinds(s)).toHaveLength(4);
     const wants = { ore: 100 };
     expect(jobPay(s, 'quick', wants)).toBe(Math.round(100 * 1.3 * SALVAGER_PAY));
     expect(tick(s, 0.1).state.jobs.slots).toHaveLength(4);
   });
-  it('Contractor (35): the Auto-Winch can be built; it fires the beams touching it', () => {
+  it('Contractor: the Auto-Winch can be built; it fires the beams touching it', () => {
     let s = own(opened(), '3,0', '0,2');
     expect(placeModule(s, 'winch', '3,0')).toEqual({ ok: false, reason: 'locked' });
     s = { ...s, jobs: { ...s.jobs, rep: RANKS[RANK.winch].rep } };
@@ -182,8 +182,8 @@ describe('Reputation ranks', () => {
     const later = run(winched, 20, 0.1);
     expect(later.bay.length + (later.crusher.rock ? 1 : 0)).toBeGreaterThanOrEqual(BAL.baySlots); // the Bay filled up hands-free
   });
-  it('Fleet Partner (70): a Core Shard, given once', () => {
-    const s = { ...opened(), jobs: { ...opened().jobs, rep: 69, rankPaid: RANK.winch } };
+  it('Fleet Partner: a Core Shard, given once', () => {
+    const s = { ...opened(), jobs: { ...opened().jobs, rep: RANKS[RANK.partner].rep - 1, rankPaid: RANK.winch } };
     const out = finishWith(s, 1);
     expect(rank(out.state)).toBe(RANK.partner);
     expect(out.state.items.core_shard).toBe(s.items.core_shard + 1);

@@ -36,7 +36,7 @@ import {
 import { RANK, RANKS } from '../data/jobs';
 import { C, FONT, T } from './palette';
 import {
-  arrowsFor, boundsOf, CELL, clampPan, localPos, panLimits, panToShow, toScreen, VIEW, ZOOM,
+  arrowsFor, boundsOf, CELL, cellAt, clampPan, localPos, panLimits, panToShow, toScreen, VIEW, ZOOM, ZOOM_MAX, zoomAbout, zoomRange,
   setViewWidth, type PanLimits,
 } from './shipLayout';
 
@@ -51,7 +51,12 @@ setViewWidth(W);
 const CW = W - 32;
 /** Render at the device pixel ratio (capped) so text and shapes stay sharp on retina phones. */
 export const DPR = Math.min(Math.max(window.devicePixelRatio || 1, 1), 3);
-const TILE = CELL; // local tile size; the ship container is scaled by ZOOM on screen
+const TILE = CELL; // local tile size; the ship container is scaled by the current zoom on screen
+/** Ship-view gestures: a press that moves more than this (px) is a swipe, not a tap; two taps this close (ms) reset the view. */
+const DRAG_SLOP = 8;
+const DOUBLE_TAP_MS = 320;
+/** View settings kept on the device, not in the save. */
+const VIEW_KEY = 'last-tug-view';
 const PAN_SPEED = 420; // px per second while an arrow is held
 const MAX_GHOSTS = 4;
 const STAGE = { x: 16, y: 466, w: CW, h: 184, cx: W / 2, cy: 556, r: 60 };
@@ -128,7 +133,20 @@ export class ShipScene extends Phaser.Scene {
   private stars: { x: number; y: number; r: number; a: number; z: number }[] = [];
   private starShift = 0;
   private mapTimer = 0;
+  /** Current ship zoom (pinch) and the touch gesture in progress on the ship view. */
+  private zoom = ZOOM;
+  private swiped = false;
+  private gesture: {
+    pts: Map<number, { x: number; y: number }>;
+    start: { x: number; y: number; panX: number; panY: number } | null;
+    pinch: { dist: number; zoom: number } | null;
+    moved: boolean;
+    overUi: boolean;
+    lastTap: number;
+  } = { pts: new Map(), start: null, pinch: null, moved: false, overUi: false, lastTap: 0 };
   private sheetBuild?: () => SheetSpec;
+  /** What a tap on each ship cell does ("x,y" -> action), rebuilt with the ship drawing. */
+  private tileActions = new Map<string, () => void>();
   private cargoOff = new Set<ItemId>(); // rows the player un-ticked in the Cargo sheet
   private moveUid: number | null = null; // module being moved: tap an Open tile to drop it there
   private sellArm: number | null = null; // module whose Sell button has been tapped once (tap again to confirm)
@@ -153,7 +171,8 @@ export class ShipScene extends Phaser.Scene {
     cam.setZoom(DPR);
     cam.setScroll(-(W * DPR - W) / 2, -(H * DPR - H) / 2);
     this.initStars();
-    this.ship = this.add.container(0, 0).setScale(ZOOM);
+    this.loadView();
+    this.ship = this.add.container(0, 0).setScale(this.zoom);
     this.layer = this.add.container(0, 0);
     this.dynShip = this.add.graphics();
     this.ship.add([this.layer, this.dynShip]);
@@ -162,6 +181,7 @@ export class ShipScene extends Phaser.Scene {
     this.ship.setMask(clip.createGeometryMask());
     this.hud = this.add.container(0, 0);
     this.buildDynamic();
+    this.setupGestures();
     this.updateLimits(true);
     this.redraw();
     if (this.debug) (window as unknown as { __ship: ShipScene }).__ship = this; // for scripted tests
@@ -334,6 +354,7 @@ export class ShipScene extends Phaser.Scene {
 
   // ---- drawing -----------------------------------------------------------
   private redraw(): void {
+    this.tileActions.clear();
     this.layer.removeAll(true);
     this.hud.removeAll(true);
     this.updateLimits(false);
@@ -354,8 +375,16 @@ export class ShipScene extends Phaser.Scene {
   }
 
   /** Recompute scroll limits from the owned tiles and ghost tiles; `first` also sets the starting pan. */
+  private shipBounds() {
+    return boundsOf(this.state.ship.ownedCells.map(parseKey), this.ghostCells());
+  }
+
   private updateLimits(first: boolean): void {
-    this.limits = panLimits(boundsOf(this.state.ship.ownedCells.map(parseKey), this.ghostCells()));
+    const b = this.shipBounds();
+    const zr = zoomRange(b);
+    this.zoom = Math.min(zr.max, Math.max(zr.min, this.zoom));
+    this.ship?.setScale(this.zoom);
+    this.limits = panLimits(b, this.zoom);
     const l = this.limits;
     if (first) {
       this.panGoal = { x: l.fitsX ? l.minX : l.maxX, y: l.fitsY ? l.minY : (l.minY + l.maxY) / 2 };
@@ -379,24 +408,136 @@ export class ShipScene extends Phaser.Scene {
     this.ship.setPosition(this.pan.x, this.pan.y);
   }
 
+  // ---- ship view gestures: swipe to scroll, pinch to zoom, tap a tile, double-tap to reset ----------
+  private loadView(): void {
+    try {
+      const v = JSON.parse(localStorage.getItem(VIEW_KEY) ?? '{}') as { zoom?: number; swiped?: boolean };
+      if (typeof v.zoom === 'number' && Number.isFinite(v.zoom)) this.zoom = v.zoom;
+      this.swiped = !!v.swiped;
+    } catch { /* blocked storage: defaults */ }
+  }
+
+  private saveView(): void {
+    try { localStorage.setItem(VIEW_KEY, JSON.stringify({ zoom: this.zoom, swiped: this.swiped })); } catch { /* ignore */ }
+  }
+
+  /** Zoom to z, keeping the point under `anchor` (screen) where it is, within the pan limits. */
+  private setZoom(z: number, anchor: { x: number; y: number }): void {
+    const next = zoomAbout(this.pan, this.zoom, z, anchor);
+    this.zoom = z;
+    this.ship.setScale(z);
+    this.limits = panLimits(this.shipBounds(), z);
+    this.pan = clampPan(next, this.limits);
+    this.panGoal = { ...this.pan };
+    this.ship.setPosition(this.pan.x, this.pan.y);
+  }
+
+  /** Double-tap on empty space: zoom out to fit the whole ship and centre it. */
+  private resetView(): void {
+    const b = this.shipBounds();
+    this.zoom = zoomRange(b).fit;
+    this.ship.setScale(this.zoom);
+    this.limits = panLimits(b, this.zoom);
+    this.panGoal = { x: (this.limits.minX + this.limits.maxX) / 2, y: (this.limits.minY + this.limits.maxY) / 2 };
+    this.saveView();
+  }
+
+  private setupGestures(): void {
+    const g = this.gesture;
+    const arrowZones = () => Object.values(this.arrowZones) as Phaser.GameObjects.GameObject[];
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => {
+      if (this.sheet || !this.inView(p)) return;
+      g.pts.set(p.id, { x: p.worldX, y: p.worldY });
+      if (g.pts.size === 1) {
+        g.start = { x: p.worldX, y: p.worldY, panX: this.pan.x, panY: this.pan.y };
+        g.moved = false;
+        g.pinch = null;
+        g.overUi = over.some((o) => arrowZones().includes(o));
+      } else if (g.pts.size === 2) {
+        const [a, b] = [...g.pts.values()];
+        g.pinch = { dist: Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)), zoom: this.zoom };
+        g.moved = true; // a pinch is never a tap
+        this.panDir = { x: 0, y: 0 };
+      }
+    });
+    this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
+      if (!g.pts.has(p.id) || !p.isDown) return;
+      g.pts.set(p.id, { x: p.worldX, y: p.worldY });
+      if (g.pinch && g.pts.size >= 2) {
+        const [a, b] = [...g.pts.values()];
+        const dist = Math.max(10, Math.hypot(a.x - b.x, a.y - b.y));
+        const zr = zoomRange(this.shipBounds());
+        const z = Math.min(zr.max, Math.max(zr.min, g.pinch.zoom * (dist / g.pinch.dist)));
+        this.setZoom(z, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+        return;
+      }
+      if (!g.start || g.overUi) return;
+      const dx = p.worldX - g.start.x, dy = p.worldY - g.start.y;
+      if (!g.moved && Math.hypot(dx, dy) > DRAG_SLOP) g.moved = true;
+      if (!g.moved) return;
+      this.panGoal = clampPan({ x: g.start.panX + dx, y: g.start.panY + dy }, this.limits);
+      this.pan = { ...this.panGoal };
+      this.ship.setPosition(this.pan.x, this.pan.y);
+      if (!this.swiped && (Math.abs(dx) > 24 || Math.abs(dy) > 24)) { this.swiped = true; this.saveView(); }
+    });
+    const up = (p: Phaser.Input.Pointer) => {
+      if (!g.pts.has(p.id)) return;
+      g.pts.delete(p.id);
+      if (g.pinch) {
+        if (g.pts.size === 1) {
+          // one finger stays down after a pinch: it pans from here, it never taps
+          const [rest] = [...g.pts.values()];
+          g.start = { x: rest.x, y: rest.y, panX: this.pan.x, panY: this.pan.y };
+        }
+        g.pinch = null;
+        this.saveView();
+        return;
+      }
+      if (g.pts.size > 0) return;
+      const tap = !g.moved && !g.overUi && !this.sheet;
+      g.start = null;
+      if (tap) this.onShipTap(p.worldX, p.worldY);
+    };
+    this.input.on('pointerup', up);
+    this.input.on('pointerupoutside', up);
+  }
+
+  /** A tap on the ship view: the tile under the finger acts; a double-tap on empty space resets the view. */
+  private onShipTap(x: number, y: number): void {
+    const fn = this.tileActions.get(cellKey(cellAt(this.pan, this.zoom, x, y)));
+    if (fn) {
+      this.gesture.lastTap = 0;
+      fn();
+      return;
+    }
+    if (this.moveUid !== null) { this.cancelMove(); return; }
+    const now = this.time.now;
+    if (now - this.gesture.lastTap < DOUBLE_TAP_MS) {
+      this.gesture.lastTap = 0;
+      this.resetView();
+    } else {
+      this.gesture.lastTap = now;
+    }
+  }
+
   /** Scroll so a (newly bought) tile is visible. */
   private focusCell(c: Cell): void {
-    this.panGoal = panToShow(this.panGoal, c, this.limits);
+    this.panGoal = panToShow(this.panGoal, c, this.limits, this.zoom);
   }
 
   /** World (screen) position of the centre of a template cell, following the current pan. */
   private cellWorld(c: Cell): { x: number; y: number } {
     const p = localPos(c);
-    return { x: this.pan.x + (p.x + TILE / 2) * ZOOM, y: this.pan.y + (p.y + TILE / 2) * ZOOM };
+    return { x: this.pan.x + (p.x + TILE / 2) * this.zoom, y: this.pan.y + (p.y + TILE / 2) * this.zoom };
   }
 
   private inView(p: Phaser.Input.Pointer): boolean {
     return p.worldX >= VIEW.x && p.worldX < VIEW.x + VIEW.w && p.worldY >= VIEW.y && p.worldY < VIEW.y + VIEW.h;
   }
 
-  /** Text that lives inside the zoomed ship container: rasterise at DPR * ZOOM so it stays sharp. */
+  /** Text that lives inside the zoomed ship container: rasterise for the deepest zoom so it stays sharp. */
   private shipTxt(x: number, y: number, text: string, style: Phaser.Types.GameObjects.Text.TextStyle): Phaser.GameObjects.Text {
-    return this.add.text(x, y, text, { ...style, resolution: DPR * ZOOM });
+    return this.add.text(x, y, text, { ...style, resolution: Math.min(6, DPR * ZOOM_MAX) });
   }
 
   private arrowRects(): Record<'left' | 'right' | 'up' | 'down', { x: number; y: number; w: number; h: number }> {
@@ -410,7 +551,8 @@ export class ShipScene extends Phaser.Scene {
   }
 
   private drawArrows(g: Phaser.GameObjects.Graphics): void {
-    const a = arrowsFor(this.pan, this.limits);
+    // the arrows are a backup: once the player has swiped the ship, they go away
+    const a = this.swiped ? { left: false, right: false, up: false, down: false } : arrowsFor(this.pan, this.limits);
     const r = this.arrowRects();
     const pulse = 0.75 + 0.25 * Math.sin(this.elapsed * 4);
     (['left', 'right', 'up', 'down'] as const).forEach((k) => {
@@ -452,12 +594,8 @@ export class ShipScene extends Phaser.Scene {
     const mods = this.state.ship.modules;
     const byCell = new Map(mods.map((m) => [m.cell, m]));
     const beamIndex = (uid: number) => this.state.beams.findIndex((b) => b.uid === uid);
-    const hitZone = (c: Cell, fn: () => void) => {
-      const p = this.px(c);
-      const z = this.add.zone(p.x + TILE / 2, p.y + TILE / 2, TILE, TILE).setInteractive();
-      z.on('pointerdown', (ptr: Phaser.Input.Pointer) => { if (this.inView(ptr)) fn(); });
-      this.layer.add(z);
-    };
+    // taps are resolved by the ship-view gesture handler (tap vs swipe vs pinch), cell by cell
+    const hitZone = (c: Cell, fn: () => void) => { this.tileActions.set(cellKey(c), fn); };
     for (const c of owned) {
       const key = cellKey(c);
       const m = byCell.get(key);
@@ -538,9 +676,8 @@ export class ShipScene extends Phaser.Scene {
           fontFamily: FONT, fontSize: '15px', fontStyle: '600', color: ok ? T.gold : T.dim,
         })
         .setOrigin(0.5);
-      const hit = this.add.zone(x + TILE / 2, y + TILE / 2, 56, 56).setInteractive({ useHandCursor: true });
-      hit.on('pointerup', (p: Phaser.Input.Pointer) => { if (this.inView(p)) this.tryBuy(c); });
-      this.layer.add([g, label, hit]);
+      this.tileActions.set(cellKey(c), () => this.tryBuy(c));
+      this.layer.add([g, label]);
     }
   }
 
@@ -605,7 +742,7 @@ export class ShipScene extends Phaser.Scene {
     if (!st.flags.tappedBeam) {
       const bw = this.cellWorld(this.moduleCell('beam', 0) ?? { x: 2, y: 0 });
       const bx = bw.x;
-      const top = bw.y - 28 * ZOOM - 8 - 26 - 14; // above the nose tile (and its canopy)
+      const top = bw.y - 28 * this.zoom - 8 - 26 - 14; // above the nose tile (and its canopy)
       const b = this.add.graphics();
       b.fillStyle(C.highlight, 1).fillRoundedRect(bx - 62, top, 124, 26, 13);
       b.fillTriangle(bx - 7, top + 25, bx + 7, top + 25, bx, top + 33);
@@ -690,7 +827,7 @@ export class ShipScene extends Phaser.Scene {
     if (!cell) return;
     const w = this.cellWorld(cell);
     if (w.x < VIEW.x + 10 || w.x > VIEW.x + VIEW.w - 10 || w.y < VIEW.y - 10 || w.y > VIEW.y + VIEW.h) return;
-    this.floatText(w.x, Math.max(VIEW.y + 16, w.y - 28 * ZOOM - 6), msg, color);
+    this.floatText(w.x, Math.max(VIEW.y + 16, w.y - 28 * this.zoom - 6), msg, color);
   }
 
   /** Floating text over the tile of the module with this uid (falls back to nothing if it is gone). */

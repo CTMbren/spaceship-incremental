@@ -60,6 +60,22 @@ export const HELP: readonly HelpCard[] = [
     ],
   },
   {
+    title: 'Jobs and Reputation',
+    lines: [
+      'The Jobs tab opens with your second beam. Each job asks for materials and pays more than selling, plus Reputation.',
+      'Hand over part of a job now and the rest later; what you hand over is kept safe in the job. Local jobs can only be finished at their field.',
+      'A finished slot gets a new job after 10 minutes of play. Skip swaps a job once every 30 minutes.',
+      'Reputation ranks: Hauler (Bay holds 4), Salvager (a 4th job, +10% pay), Contractor (the Auto-Winch), Fleet Partner (gold trim and a Core Shard).',
+    ],
+  },
+  {
+    title: 'Moving around the ship',
+    lines: [
+      'Swipe the ship to scroll it. Pinch with two fingers to zoom in or out.',
+      'Double-tap empty space to zoom out until the whole ship fits.',
+    ],
+  },
+  {
     title: 'Selling',
     lines: [
       'At first Sell sells all your Ore in one tap.',

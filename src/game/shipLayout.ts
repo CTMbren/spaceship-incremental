@@ -81,6 +81,37 @@ export function panLimits(b: Bounds, zoom = ZOOM, view = VIEW, pad = PAN_PAD): P
 
 export const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 
+/** Pinch zoom limits (Day 9): out to 0.6x at most, in to 1.6x the default zoom. */
+export const ZOOM_MIN = 0.6;
+export const ZOOM_MAX = ZOOM * 1.6;
+
+/** The zoom at which the whole ship (bounds) fits the view. */
+export function fitZoom(b: Bounds, view = VIEW, pad = PAN_PAD): number {
+  return Math.min((view.w - 2 * pad) / Math.max(1, b.x1 - b.x0), (view.h - 2 * pad) / Math.max(1, b.y1 - b.y0));
+}
+
+/**
+ * Allowed zoom for these bounds: you can zoom out only as far as the whole ship fitting (never below 0.6x, and
+ * never needing to go below the default when it already fits), and in to 1.6x the default.
+ */
+export function zoomRange(b: Bounds, view = VIEW): { min: number; max: number; fit: number } {
+  const fit = clamp(Math.min(fitZoom(b, view), ZOOM), ZOOM_MIN, ZOOM);
+  return { min: fit, max: ZOOM_MAX, fit };
+}
+
+/** New container position after zooming from z0 to z1 so the point under `anchor` (screen) stays put. */
+export function zoomAbout(pan: { x: number; y: number }, z0: number, z1: number, anchor: { x: number; y: number }): { x: number; y: number } {
+  const lx = (anchor.x - pan.x) / z0, ly = (anchor.y - pan.y) / z0;
+  return { x: anchor.x - lx * z1, y: anchor.y - ly * z1 };
+}
+
+/** The template cell under a screen point (whether or not the player owns it). */
+export function cellAt(pan: { x: number; y: number }, zoom: number, wx: number, wy: number): Cell {
+  const col = Math.floor((wx - pan.x) / zoom / CELL);
+  const row = Math.floor((wy - pan.y) / zoom / CELL);
+  return fromScreen({ col, row });
+}
+
 export function clampPan(p: { x: number; y: number }, l: PanLimits): { x: number; y: number } {
   return { x: clamp(p.x, l.minX, l.maxX), y: clamp(p.y, l.minY, l.maxY) };
 }
