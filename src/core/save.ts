@@ -1,5 +1,8 @@
+import { MODULES } from '../data/modules';
+import { SOLAR } from '../data/power';
+import { evaluatePower } from './power';
 import { SAVE_VERSION, createInitialState } from './state';
-import type { GameState, Rock } from './types';
+import type { BeamState, GameState, Rock } from './types';
 
 const KEY = 'last-tug-save';
 
@@ -96,6 +99,32 @@ export function parseSave(raw: string | null): { ok: true; state: GameState } | 
         ? [{ uid: meltMod.uid, paid: { credits: 0, items: { ore: 25 } }, level: smelter.level, on: smelter.on, progress: smelter.progress }]
         : (cur.smelters ?? []);
       cur = { ...rest, smashers, smelters, version: 7 };
+    }
+    if (cur.version < 8) {
+      // v7 -> v8 (Day 8): beams know their module (uid) and kind; travel state; power arrives.
+      const fresh = createInitialState();
+      const mods = cur.ship?.modules ?? fresh.ship.modules;
+      const beamMods = mods.filter((m) => m.defId === 'beam');
+      const oldBeams = (cur.beams ?? fresh.beams) as Partial<BeamState>[];
+      const beams: BeamState[] = oldBeams.map((b, i) => ({
+        uid: b.uid ?? beamMods[i]?.uid ?? i + 1, kind: b.kind ?? 'tractor',
+        status: b.status ?? 'idle', remaining: b.remaining ?? 0, level: b.level ?? 1,
+      }));
+      const flags = { ...fresh.flags, ...(cur.flags ?? {}) };
+      const next = { ...cur, beams, travel: cur.travel ?? fresh.travel, flags, version: 8 } as GameState;
+      // A ship built before power existed may now draw more than the hull supplies. Give it the Plate for the
+      // Solar Wings it needs (each gives 2 power), once, and let the scene explain why.
+      if (flags.powerNotice === 0 && (next.ship?.modules?.length ?? 0) > 0 && next.items) {
+        const p = evaluatePower({ ...fresh, ...next });
+        const wings = Math.ceil(Math.max(0, p.draw - p.supply) / SOLAR.levels[0].output);
+        let plate = 0;
+        for (let i = 0; i < wings; i++) plate += MODULES.solar.costs[i]?.items?.plate ?? 0;
+        if (plate > 0) {
+          next.items = { ...next.items, plate: (next.items.plate ?? 0) + plate };
+          next.flags = { ...flags, powerNotice: plate };
+        }
+      }
+      cur = next;
     }
     return { ok: true, state: { ...createInitialState(), ...cur } as GameState };
   } catch {

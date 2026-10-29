@@ -22,14 +22,18 @@ export interface HullDef {
   tileCosts: Cost[];
 }
 
-export type ModuleId = 'beam' | 'smasher' | 'smelter';
+export type ModuleId = 'beam' | 'smasher' | 'smelter' | 'solar' | 'engine' | 'grapple';
 
-/** A module sitting on one owned tile (1x1 modules only until Day 7 adds footprints). */
+/** A module sitting on one owned tile (1x1 modules only until footprints arrive). */
 export interface ModuleInstance {
   uid: number;
   defId: ModuleId;
   /** Owned-cell key "x,y". */
   cell: string;
+  /** Level of modules with no unit state of their own (Solar Wing, Engine). Default 1. */
+  level?: number;
+  /** What it cost to build (sell refund) for modules with no unit state of their own (Solar, Engine, Grapple). */
+  paid?: Cost;
 }
 
 export interface ShipState {
@@ -39,20 +43,40 @@ export interface ShipState {
   modules: ModuleInstance[];
 }
 
+export type RockKind = 'dust' | 'ice' | 'heavy' | 'big';
+
 export interface Rock {
-  kind: 'dust';
+  kind: RockKind;
   geode: boolean;
   hp: number;
   maxHp: number;
   ore: number;
+  /** Ice it holds (Ice chunks and Heavy rocks). Missing means 0 (older saves). */
+  ice?: number;
 }
 
 export interface BeamState {
+  /** Module uid of the beam's tile (a Tractor Beam or a Grapple Beam module). */
+  uid: number;
+  /** tractor: fast, small rocks. grapple: slow, one big rock (Heavy rocks with Ice from the Rubble Belt on). */
+  kind: 'tractor' | 'grapple';
   /** idle: waiting for a tap. counting: countdown running. blocked: arrived but the Bay is full. */
   status: 'idle' | 'counting' | 'blocked';
   remaining: number;
-  /** Tractor Beam level 1..4: richer rocks. Beam i belongs to the i-th beam module. */
+  /** Level 1..4. Tractor: richer rocks. Grapple: shorter countdown. */
   level: number;
+}
+
+/** Where the ship is on the system route (Day 8). */
+export interface TravelState {
+  /** Index of the node the ship is at, or left from while cruising. */
+  node: number;
+  /** Node it is cruising to, or null when parked at `node`. */
+  dest: number | null;
+  /** Seconds of level-1 cruising done on the current leg. */
+  progress: number;
+  /** Nodes reached so far (index list, in order). */
+  visited: number[];
 }
 
 export interface CrusherState {
@@ -127,8 +151,12 @@ export interface GameState {
   stats: Stats;
   /** Geodes opened since the last guaranteed Core Shard. Persists across Jump. */
   pity: number;
-  /** holdForGoal: Sell and the Smelter keep back what the current goal needs (Cargo sheet switch). */
-  flags: { tappedBeam: boolean; usedHold: boolean; holdForGoal: boolean };
+  /**
+   * holdForGoal: Sell and the Smelter keep back what the current goal needs (Cargo sheet switch).
+   * powerNotice: Plate given to a ship that existed before power arrived (Day 8); the scene explains it once, then 0.
+   */
+  flags: { tappedBeam: boolean; usedHold: boolean; holdForGoal: boolean; powerNotice: number };
+  travel: TravelState;
   /** Epoch ms the game was last seen (stamped by the scene when saving); 0 = never. Drives offline catch-up. */
   savedAt: number;
 }
@@ -141,13 +169,15 @@ export type GameEvent =
   | { kind: 'overheat' }
   | { kind: 'hold_tick' }
   | { kind: 'sent' }
-  | { kind: 'smashed'; ore: number; uid?: number }
+  | { kind: 'smashed'; ore: number; ice?: number; uid?: number }
+  | { kind: 'departed'; to: number }
+  | { kind: 'arrived'; node: number }
   | { kind: 'repaired' }
   | { kind: 'smelted'; plate: number; uid?: number }
   | { kind: 'built'; module: ModuleId }
   | { kind: 'module_sold'; module: ModuleId; credits: number }
   | { kind: 'module_moved'; module: ModuleId }
-  | { kind: 'upgraded'; what: 'beam' | 'smelter' | 'smasher' | 'hand'; level: number }
+  | { kind: 'upgraded'; what: 'beam' | 'smelter' | 'smasher' | 'hand' | 'solar' | 'engine'; level: number }
   | { kind: 'smasher_upgraded'; level: number }
-  | { kind: 'crushed'; ore: number; geode: boolean; credits: number; shard: boolean }
+  | { kind: 'crushed'; ore: number; ice?: number; geode: boolean; credits: number; shard: boolean }
   | { kind: 'sold'; item: ItemId; qty: number; credits: number };

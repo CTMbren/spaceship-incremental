@@ -45,7 +45,7 @@ describe('beam and Bay', () => {
     let s = createInitialState();
     const rock = { kind: 'dust' as const, geode: false, hp: 99, maxHp: 99, ore: 3 };
     // beam already counting (fired before the stage filled); Bay full and stage busy
-    s = { ...s, bay: [rock, rock, rock], crusher: { ...s.crusher, rock }, beams: [{ status: 'counting', remaining: BAL.beamCountdown, level: 1 }] };
+    s = { ...s, bay: [rock, rock, rock], crusher: { ...s.crusher, rock }, beams: [{ uid: 1, kind: 'tractor' as const, status: 'counting', remaining: BAL.beamCountdown, level: 1 }] };
     s = run(s, BAL.beamCountdown + 0.5);
     expect(s.beams[0].status).toBe('blocked');
     expect(s.bay).toHaveLength(3);
@@ -142,7 +142,7 @@ describe('crusher', () => {
     let geodes = 0;
     const n = 2000;
     for (let i = 0; i < n; i++) {
-      s = { ...s, beams: [{ status: 'counting', remaining: 0.01, level: 1 }], bay: [], crusher: { ...s.crusher, rock: null } };
+      s = { ...s, beams: [{ uid: 1, kind: 'tractor' as const, status: 'counting', remaining: 0.01, level: 1 }], bay: [], crusher: { ...s.crusher, rock: null } };
       s = tick(s, 0.1).state;
       if (s.crusher.rock?.geode) geodes++;
     }
@@ -167,7 +167,7 @@ describe('sell and goals', () => {
     expect(JSON.stringify(s)).toBe(before);
     expect(sell(r.state, 'ore').events).toEqual([]);
   });
-  it('goal chain: tap beam, crush, sell, Smelter, repair, send, second beam, then the hull goal', () => {
+  it('goal chain: tap beam, crush, sell, Smelter, repair, send, then power before the second beam', () => {
     let s = createInitialState();
     expect(currentGoal(s)?.id).toBe('tap-beam');
     s = tapBeam(s).state;
@@ -181,11 +181,11 @@ describe('sell and goals', () => {
     s = { ...s, smashers: [{ ...s.smashers[0], repaired: true }] };
     expect(currentGoal(s)?.id).toBe('send');
     s = { ...s, stats: { ...s.stats, sent: 1 } };
-    expect(currentGoal(s)?.id).toBe('expand'); // no free tile for a beam yet (beam, Smasher, Smelter fill the start)
+    // beam, Smasher and Smelter use all 3 of the hull's power, and fill the start tiles
+    expect(currentGoal(s)?.id).toBe('expand');
     s = { ...s, ship: { ...s.ship, ownedCells: [...s.ship.ownedCells, '1,1'] } };
-    expect(currentGoal(s)?.id).toBe('beam2');
-    s = { ...s, beams: [...s.beams, { status: 'idle', remaining: 0, level: 1 }] };
-    expect(currentGoal(s)).toBeNull();
+    expect(currentGoal(s)?.id).toBe('solar');
+    // (the rest of the chain, Engine -> Depart -> Grapple, is in tests/day8.test.ts)
   });
 });
 
@@ -196,7 +196,7 @@ describe('save migration', () => {
       ship: { hullId: 'tug', ownedCells: ['2,0', '2,1', '2,2', '1,2'] },
     });
     const s = deserialize(v1);
-    expect(s.version).toBe(7);
+    expect(s.version).toBe(8);
     expect(s.credits).toBe(321);
     expect(s.items.ore).toBe(5);
     expect(s.items.ice).toBe(0);

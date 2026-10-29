@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { addBeam } from './helpers';
 import { cargoRows, sellMode } from '../src/core/cargo';
 import { fmtNum, formatVersion } from '../src/core/format';
 import { bayRoom, sellAll, sellSelected, sellSurplus, setHoldForGoal, tapAllBeams, tapBeam, tick } from '../src/core/loop';
@@ -14,9 +15,11 @@ const run = (s: GameState, secs: number, step = 0.05): GameState => {
   for (let t = 0; t < secs - 1e-9; t += step) cur = tick(cur, step).state;
   return cur;
 };
-const withBeams = (n: number, s = createInitialState()): GameState => ({
-  ...s, beams: Array.from({ length: n }, () => ({ status: 'idle' as const, remaining: 0, level: 1 })),
-});
+const withBeams = (n: number, s = createInitialState()): GameState => {
+  let cur = s;
+  while (cur.beams.length < n) cur = addBeam(cur);
+  return cur;
+};
 
 describe('Bay room and Fire', () => {
   it('room = slots - rocks in the Bay - rocks on their way', () => {
@@ -150,8 +153,8 @@ describe('save v5 -> v7 and Paste save', () => {
     const r = parseSave(JSON.stringify(v5));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.state.version).toBe(7);
-    expect(r.state.flags).toEqual({ tappedBeam: true, usedHold: false, holdForGoal: true });
+    expect(r.state.version).toBe(8);
+    expect(r.state.flags).toEqual({ tappedBeam: true, usedHold: false, holdForGoal: true, powerNotice: 0 });
     const again = parseSave(serialize(r.state));
     expect(again.ok && again.state).toEqual(r.state);
   });
@@ -197,12 +200,26 @@ describe('goal chip after the tutorial', () => {
     const b = createInitialState();
     const s: GameState = {
       ...b, flags: { ...b.flags, tappedBeam: true }, stats: { ...b.stats, rocks: 1, sold: 1, sent: 1 },
+      // the Day 8 chain is done too: second beam, Engine, been to the Rubble Belt, Grapple, two Solar Wings
       smelters: [{ uid: 3, paid: { credits: 0 }, level: 1, on: true, progress: 0 }], smashers: [{ ...b.smashers[0], repaired: true }],
-      beams: [{ status: 'idle', remaining: 0, level: 1 }, { status: 'idle', remaining: 0, level: 1 }],
-      ship: { ...b.ship, ownedCells: [...b.ship.ownedCells, '1,1'], modules: [...b.ship.modules, { uid: 3, defId: 'smelter' as const, cell: '2,2' }] },
+      beams: [
+        { uid: 1, kind: 'tractor' as const, status: 'idle', remaining: 0, level: 1 }, { uid: 9, kind: 'tractor' as const, status: 'idle', remaining: 0, level: 1 },
+        { uid: 11, kind: 'grapple' as const, status: 'idle', remaining: 0, level: 1 },
+      ],
+      travel: { node: 1, dest: null, progress: 0, visited: [0, 1] },
+      ship: {
+        ...b.ship, ownedCells: [...b.ship.ownedCells, '1,1', '1,2', '1,3'],
+        modules: [
+          ...b.ship.modules, { uid: 3, defId: 'smelter' as const, cell: '2,2' }, { uid: 10, defId: 'engine' as const, cell: 'e10' },
+          { uid: 11, defId: 'grapple' as const, cell: 'g11' }, { uid: 12, defId: 'solar' as const, cell: '1,2', level: 3 }, { uid: 13, defId: 'solar' as const, cell: '1,3', level: 3 },
+        ],
+      },
     };
     expect(chipText(s)).toMatch(/Open tile/);
     expect(chipText(s)).not.toMatch(/Expand/);
+    // without the Solar Wings there is no spare power, so the chip asks for a Solar Wing first
+    const dark = { ...s, ship: { ...s.ship, modules: s.ship.modules.filter((m) => m.defId !== 'solar') } };
+    expect(chipText(dark)).toMatch(/Solar Wing/);
   });
 });
 

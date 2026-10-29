@@ -1,12 +1,16 @@
 import { BAL, PRICES } from '../data/balance';
 import { HAND } from '../data/hand';
 import { BEAM, SMELTER } from '../data/modules';
+import { POWER, SOLAR } from '../data/power';
 import { SMASHER } from '../data/smasher';
+import { ENGINE, GRAPPLE } from '../data/travel';
 import { canAfford } from './actions';
+import { evaluatePower, powerMul, type PowerInfo } from './power';
 import { availableQty, SELLABLE, smeltableQty } from './reserve';
 import { nextRandom } from './rng';
+import { travelStep, zoneOf } from './travel';
 import { roomiestSmasher, smasherCap, smasherReady } from './units';
-import type { GameEvent, GameState, ItemId, Rock } from './types';
+import type { BeamState, GameEvent, GameState, ItemId, Rock, RockKind } from './types';
 
 export interface Outcome {
   state: GameState;
@@ -21,13 +25,41 @@ function rand(s: GameState): number {
   return v;
 }
 
-function makeRock(s: GameState, forceGeode?: boolean, beamLevel = 1): Rock {
-  const geode = forceGeode ?? rand(s) < BAL.geode.rate;
-  const base = BAL.rock.dust;
-  const hp = geode ? Math.ceil(base.hp * BAL.geode.hpMul) : base.hp;
-  const ore = Math.round(base.ore * BEAM.levels[beamLevel - 1].oreMul);
-  return { kind: 'dust', geode, hp, maxHp: hp, ore };
+/** Which rock a beam pulls here: the zone's weighted Tractor table (one entry costs no random draw) or its Grapple rock. */
+function pickKind(s: GameState, beam: BeamState): RockKind {
+  const z = zoneOf(s);
+  if (beam.kind === 'grapple') return z.grapple;
+  const t = z.tractor;
+  if (t.length === 1) return t[0].kind;
+  const total = t.reduce((n, e) => n + e.w, 0);
+  let r = rand(s) * total;
+  for (const e of t) {
+    r -= e.w;
+    if (r < 0) return e.kind;
+  }
+  return t[t.length - 1].kind;
 }
+
+function makeRock(s: GameState, forceGeode: boolean | undefined, beam: BeamState): Rock {
+  const z = zoneOf(s);
+  const geode = forceGeode ?? rand(s) < BAL.geode.rate * z.geodeMul;
+  const kind = pickKind(s, beam);
+  const base = BAL.rock[kind];
+  const hp = geode ? Math.ceil(base.hp * BAL.geode.hpMul) : base.hp;
+  const beamMul = beam.kind === 'tractor' ? BEAM.levels[beam.level - 1].oreMul : 1;
+  const ore = Math.max(1, Math.round(base.ore * beamMul * z.oreMul));
+  return { kind, geode, hp, maxHp: hp, ore, ice: base.ice };
+}
+
+/** Seconds a beam counts down when fired now (Grapple levels shorten it; a Boost makes it 15% faster). */
+export function beamCountdown(beam: BeamState, boosted: boolean): number {
+  const base = beam.kind === 'grapple' ? GRAPPLE.countdown * GRAPPLE.levels[beam.level - 1].cdMul : BAL.beamCountdown;
+  return boosted ? base / POWER.boost : base;
+}
+
+/** A beam can be fired: it is idle and its tile has power. */
+export const beamReady = (s: GameState, beam: BeamState, power: PowerInfo = evaluatePower(s)): boolean =>
+  beam.status === 'idle' && power.powered.has(beam.uid);
 
 /** Hand Tools effects at the player's current level. */
 export const handStats = (s: GameState) => HAND.levels[s.handLevel - 1];
@@ -57,10 +89,11 @@ export const bayRoom = (s: GameState): number =>
 /** Player taps a beam. Starts its countdown if it is idle and there is room in the Bay. */
 export function tapBeam(state: GameState, index = 0): Outcome {
   const beam = state.beams[index];
-  if (!beam || beam.status !== 'idle' || bayRoom(state) <= 0) return { state, events: [] };
+  const power = evaluatePower(state);
+  if (!beam || !beamReady(state, beam, power) || bayRoom(state) <= 0) return { state, events: [] };
   const s = clone(state);
   s.beams[index].status = 'counting';
-  s.beams[index].remaining = BAL.beamCountdown;
+  s.beams[index].remaining = beamCountdown(beam, power.boosted.has(beam.uid));
   s.flags.tappedBeam = true;
   return { state: s, events: [] };
 }
@@ -68,12 +101,13 @@ export function tapBeam(state: GameState, index = 0): Outcome {
 /** The Fire button: start idle beams, as many as there is room in the Bay for (first beams first). */
 export function tapAllBeams(state: GameState): Outcome {
   let room = bayRoom(state);
-  if (room <= 0 || !state.beams.some((b) => b.status === 'idle')) return { state, events: [] };
+  const power = evaluatePower(state);
+  if (room <= 0 || !state.beams.some((b) => beamReady(state, b, power))) return { state, events: [] };
   const s = clone(state);
   for (const b of s.beams) {
-    if (room > 0 && b.status === 'idle') {
+    if (room > 0 && beamReady(s, b, power)) {
       b.status = 'counting';
-      b.remaining = BAL.beamCountdown;
+      b.remaining = beamCountdown(b, power.boosted.has(b.uid));
       room -= 1;
     }
   }
@@ -83,22 +117,31 @@ export function tapAllBeams(state: GameState): Outcome {
 
 // ---- time ------------------------------------------------------------------
 
+export interface TickOptions {
+  /** Travel advances this many times faster than production (offline: travel runs at full speed). Default 1. */
+  travelMul?: number;
+  /** False pauses every Smelter (offline: Smelters go cold after a while). Default true. */
+  smelt?: boolean;
+}
+
 /** Advance the world by dt seconds. Pure; returns a new state. */
-export function tick(state: GameState, dt: number, forceGeode?: boolean): Outcome {
+export function tick(state: GameState, dt: number, forceGeode?: boolean, opts: TickOptions = {}): Outcome {
   const s = clone(state);
   const events: GameEvent[] = [];
+  const power = evaluatePower(s);
 
-  // Beams: count down, then deliver a rock (to the Bay, or straight to the Smasher with auto-intake).
+  // Beams: count down (only with power), then deliver a rock (to the Bay, or straight to the Smasher with auto-intake).
   for (const beam of s.beams) {
-    if (beam.status === 'counting') {
+    if (beam.status === 'counting' && power.powered.has(beam.uid)) {
       beam.remaining -= dt;
       if (beam.remaining <= 0) beam.status = 'blocked'; // try to deliver below
     }
     if (beam.status === 'blocked') {
-      const rock = makeRock(s, forceGeode, beam.level);
-      // auto-intake: a level 2+ Smasher with room takes plain rocks straight from the beam (the roomiest first)
+      const rngBefore = s.rng;
+      const rock = makeRock(s, forceGeode, beam);
+      // auto-intake: a level 2+ powered Smasher with room takes plain rocks straight from the beam (the roomiest first)
       const sm = !rock.geode && s.bay.length >= 1 /* the player always keeps something to tap */
-        ? roomiestSmasher(s, SMASHER.autoIntakeLevel)
+        ? roomiestSmasher(s, SMASHER.autoIntakeLevel, power.powered)
         : null;
       if (sm) {
         sm.queue.push(rock);
@@ -111,8 +154,8 @@ export function tick(state: GameState, dt: number, forceGeode?: boolean): Outcom
         beam.remaining = 0;
         events.push({ kind: 'rock_arrived', geode: rock.geode, to: 'bay' });
       } else {
-        // Bay full: the rock waits at the beam. Undo the RNG draw side effects are harmless (seeded).
-        s.rng = state.rng;
+        // Bay full: the rock waits at the beam; undo its random draws so the next try is the same rock.
+        s.rng = rngBefore;
       }
     }
   }
@@ -146,7 +189,7 @@ export function tick(state: GameState, dt: number, forceGeode?: boolean): Outcom
   // Smashers: each works through its own queue at its rate. Carries leftover damage to the next rock.
   for (const unit of s.smashers) {
     if (!unit.repaired || unit.queue.length === 0) continue;
-    let dmg = SMASHER.levels[unit.level - 1].hpPerSec * dt;
+    let dmg = SMASHER.levels[unit.level - 1].hpPerSec * powerMul(s, power, unit.uid) * dt;
     while (dmg > 0 && unit.queue.length > 0) {
       const head = unit.queue[0];
       if (head.hp > dmg) {
@@ -156,17 +199,19 @@ export function tick(state: GameState, dt: number, forceGeode?: boolean): Outcom
         dmg -= head.hp;
         unit.queue.shift();
         s.items.ore += head.ore;
+        s.items.ice += head.ice ?? 0;
         s.stats.rocks += 1;
         s.stats.smashed += 1;
-        events.push({ kind: 'smashed', ore: head.ore, uid: unit.uid });
+        events.push({ kind: 'smashed', ore: head.ore, ice: head.ice ?? 0, uid: unit.uid });
       }
     }
   }
 
   // Smelters: each turns Ore into Plate in batches from the shared stock, never touching Ore reserved for the current goal.
   for (const sm of s.smelters) {
-    if (!sm.on) continue;
-    const secPerBatch = SMELTER.levels[sm.level - 1].secPerBatch;
+    const mul = powerMul(s, power, sm.uid);
+    if (!sm.on || opts.smelt === false || mul <= 0) continue;
+    const secPerBatch = SMELTER.levels[sm.level - 1].secPerBatch / mul;
     let t = dt;
     while (t > 1e-12) {
       if (smeltableQty(s, 'ore') < SMELTER.batchIn) {
@@ -187,6 +232,9 @@ export function tick(state: GameState, dt: number, forceGeode?: boolean): Outcom
       }
     }
   }
+
+  // Travel: the Engine moves the ship along the route (offline it runs at full speed: travelMul).
+  travelStep(s, dt * (opts.travelMul ?? 1), power, events);
   return { state: s, events };
 }
 
@@ -224,6 +272,7 @@ function applyHit(s: GameState, nx: number, ny: number, kind: HitKind, events: G
     let credits = 0;
     let shard = false;
     s.items.ore += rock.ore;
+    s.items.ice += rock.ice ?? 0;
     s.stats.rocks += 1;
     if (rock.geode) {
       s.stats.geodes += 1;
@@ -238,7 +287,7 @@ function applyHit(s: GameState, nx: number, ny: number, kind: HitKind, events: G
     }
     c.rock = null;
     c.weakT = 0;
-    events.push({ kind: 'crushed', ore: rock.ore, geode: rock.geode, credits, shard });
+    events.push({ kind: 'crushed', ore: rock.ore, ice: rock.ice ?? 0, geode: rock.geode, credits, shard });
   }
 }
 
@@ -294,7 +343,7 @@ export function releaseHold(state: GameState): Outcome {
 
 export type SendCheck =
   | { ok: true }
-  | { ok: false; reason: 'rusty' | 'no_rock' | 'geode' | 'full'; label: string };
+  | { ok: false; reason: 'rusty' | 'no_rock' | 'geode' | 'full' | 'unpowered'; label: string };
 
 /** What the Smash button should do and say right now. */
 export function canSend(s: GameState): SendCheck {
@@ -302,7 +351,11 @@ export function canSend(s: GameState): SendCheck {
   const rock = s.crusher.rock;
   if (!rock) return { ok: false, reason: 'no_rock', label: 'No rock to smash' };
   if (rock.geode) return { ok: false, reason: 'geode', label: 'Crack this one yourself' };
-  if (!roomiestSmasher(s)) {
+  const power = evaluatePower(s);
+  if (!s.smashers.some((m) => m.repaired && power.powered.has(m.uid))) {
+    return { ok: false, reason: 'unpowered', label: 'Smashers have no power' };
+  }
+  if (!roomiestSmasher(s, 1, power.powered)) {
     return { ok: false, reason: 'full', label: `Smashers full ${smasherQueued(s)}/${smasherQueueCap(s)}` };
   }
   return { ok: true };
@@ -312,7 +365,7 @@ export function canSend(s: GameState): SendCheck {
 export function sendToSmasher(state: GameState): Outcome {
   if (!canSend(state).ok) return { state, events: [] };
   const s = clone(state);
-  roomiestSmasher(s)!.queue.push(s.crusher.rock!);
+  roomiestSmasher(s, 1, evaluatePower(s).powered)!.queue.push(s.crusher.rock!);
   s.crusher.rock = null;
   s.crusher.weakT = 0;
   s.crusher.holding = false;
@@ -418,7 +471,7 @@ export function setHoldForGoal(state: GameState, on: boolean): Outcome {
 
 // ---- upgrades (credits buy speed) ----------------------------------------------------
 
-function levelUp(state: GameState, level: number, levels: readonly { cost: { credits: number } }[], apply: (s: GameState) => void, what: 'beam' | 'smelter' | 'smasher' | 'hand'): SpendResult {
+export function levelUp(state: GameState, level: number, levels: readonly { cost: { credits: number } }[], apply: (s: GameState) => void, what: 'beam' | 'smelter' | 'smasher' | 'hand' | 'solar' | 'engine'): SpendResult {
   const next = levels[level];
   if (!next) return { ok: false, reason: 'max_level' };
   const afford = canAfford(state, next.cost);
@@ -429,7 +482,13 @@ function levelUp(state: GameState, level: number, levels: readonly { cost: { cre
   return { ok: true, state: s, events: [{ kind: 'upgraded', what, level: level + 1 }] };
 }
 
-export const nextBeamUpgrade = (s: GameState, index: number) => BEAM.levels[(s.beams[index]?.level ?? 99)]?.cost;
+/** Level table of a beam: Tractor levels make richer rocks, Grapple levels shorten the countdown. */
+export const beamLevels = (b: BeamState): readonly { name: string; cost: { credits: number } }[] =>
+  b.kind === 'grapple' ? GRAPPLE.levels : BEAM.levels;
+export const nextBeamUpgrade = (s: GameState, index: number) => {
+  const b = s.beams[index];
+  return b ? beamLevels(b)[b.level]?.cost : undefined;
+};
 export const nextSmelterUpgrade = (s: GameState, index = 0) => {
   const sm = s.smelters[index];
   return sm ? SMELTER.levels[sm.level]?.cost : undefined;
@@ -439,7 +498,7 @@ export const nextHandUpgrade = (s: GameState) => HAND.levels[s.handLevel]?.cost;
 export function upgradeBeam(state: GameState, index: number): SpendResult {
   const beam = state.beams[index];
   if (!beam) return { ok: false, reason: 'max_level' };
-  return levelUp(state, beam.level, BEAM.levels, (s) => { s.beams[index].level += 1; }, 'beam');
+  return levelUp(state, beam.level, beamLevels(beam), (s) => { s.beams[index].level += 1; }, 'beam');
 }
 
 export function upgradeSmelter(state: GameState, index = 0): SpendResult {
@@ -450,6 +509,26 @@ export function upgradeSmelter(state: GameState, index = 0): SpendResult {
 
 export function upgradeHand(state: GameState): SpendResult {
   return levelUp(state, state.handLevel, HAND.levels, (s) => { s.handLevel += 1; }, 'hand');
+}
+
+/** Level table of a Solar Wing or the Engine (modules that keep their level on the module itself). */
+const simpleLevels = (id: string): readonly { cost: { credits: number } }[] => (id === 'solar' ? SOLAR.levels : ENGINE.levels);
+
+export function nextModuleUpgrade(s: GameState, uid: number) {
+  const m = s.ship.modules.find((x) => x.uid === uid);
+  if (!m || (m.defId !== 'solar' && m.defId !== 'engine')) return undefined;
+  return simpleLevels(m.defId)[m.level ?? 1]?.cost;
+}
+
+/** Upgrade a Solar Wing or the Engine. */
+export function upgradeModule(state: GameState, uid: number): SpendResult {
+  const m = state.ship.modules.find((x) => x.uid === uid);
+  if (!m || (m.defId !== 'solar' && m.defId !== 'engine')) return { ok: false, reason: 'max_level' };
+  const what = m.defId;
+  return levelUp(state, m.level ?? 1, simpleLevels(what), (s) => {
+    const mm = s.ship.modules.find((x) => x.uid === uid)!;
+    mm.level = (mm.level ?? 1) + 1;
+  }, what);
 }
 
 export function toggleSmelter(state: GameState, index = 0): Outcome {

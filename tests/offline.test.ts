@@ -43,9 +43,9 @@ describe('applyOffline', () => {
   it('a repaired Smasher keeps smashing while you are away (about 30% for the first hour)', () => {
     const { state, report } = later(repaired(), 1 * H);
     expect(report).not.toBeNull();
-    // 1 h away = 1080 s of play; the L1 Smasher clears one 35 HP rock per 15.6 s -> about 69 rocks
-    expect(report!.rocksSmashed).toBeGreaterThan(55);
-    expect(report!.rocksSmashed).toBeLessThan(75);
+    // 1 h away = 1080 s of play; the L1 Smasher clears one 35 HP rock per 13 s (Patch 7.2) -> about 83 rocks
+    expect(report!.rocksSmashed).toBeGreaterThan(70);
+    expect(report!.rocksSmashed).toBeLessThan(90);
     expect(state.items.ore).toBe(report!.rocksSmashed * 4);
     expect(report!.items.ore).toBe(state.items.ore);
     expect(state.stats.geodes).toBe(0); // geodes need hands
@@ -61,14 +61,20 @@ describe('applyOffline', () => {
     expect(report!.smasherRusty).toBe(true);
   });
 
-  it('the Smelter turns held Ore into Plate even with a rusty Smasher', () => {
+  it('the Smelter turns held Ore into Plate even with a rusty Smasher, but goes cold after 30 minutes away', () => {
     const base = stamp(createInitialState(), T0);
     const s: GameState = { ...base, smelters: [{ uid: 3, paid: { credits: 0 }, level: 1, on: true, progress: 0 }], items: { ...base.items, ore: 300 }, stats: { ...base.stats, sold: 3 } };
     const { state, report } = later(s, 1 * H);
-    expect(state.items.plate).toBe(100);
-    expect(state.items.ore).toBe(0);
-    expect(report!.items.plate).toBe(100);
-    expect(report!.items.ore).toBe(-300);
+    // 30 real minutes at 30% = 540 s of smelting = 90 batches; the rest of the Ore is still there
+    expect(state.items.plate).toBe(90);
+    expect(state.items.ore).toBe(30);
+    expect(report!.items.plate).toBe(90);
+    expect(report!.items.ore).toBe(-270);
+    expect(report!.smeltersCooled).toBe(true);
+    // away for less than the cut-off, the Smelter never stops and the report says nothing about it
+    const short = later(s, 20 * 60);
+    expect(short.report!.smeltersCooled).toBe(false);
+    expect(short.state.items.plate).toBe(60); // 1200 s x 30% = 360 s = 60 batches
   });
 
   it('is capped at 8 hours: 20 h away equals 8 h away', () => {
@@ -112,7 +118,7 @@ describe('save v4 -> v7', () => {
     const v4 = { ...createInitialState(), version: 4, savedAt: undefined } as unknown as Record<string, unknown>;
     delete v4.savedAt;
     const s = deserialize(JSON.stringify(v4));
-    expect(s.version).toBe(7);
+    expect(s.version).toBe(8);
     expect(s.savedAt).toBe(0);
     expect(deserialize(serialize(s))).toEqual(s);
     expect(deserialize(serialize(stamp(s, T0))).savedAt).toBe(T0);

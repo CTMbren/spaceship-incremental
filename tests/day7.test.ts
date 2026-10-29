@@ -8,15 +8,20 @@ import { moveModule, sellModule, sellRefund } from '../src/core/units';
 import { MODULES, SELL_REFUND } from '../src/data/modules';
 
 const dust = (): Rock => ({ kind: 'dust', geode: false, hp: 35, maxHp: 35, ore: 4 });
-/** A rich ship with 9 owned tiles, the Smelter built and the Smasher repaired. */
+/**
+ * A rich ship with 9 open-able tiles, the Smelter built and the Smasher repaired, plus a row of four level-3
+ * Solar Wings behind it (y = 3) so every module these tests add has power.
+ */
 function rich(): GameState {
   const s = createInitialState();
-  const cells = [...s.ship.ownedCells, '1,0', '1,1', '1,2', '3,0', '3,1', '3,2'];
+  const solarCells = ['1,3', '2,3', '3,3', '0,3'];
+  const cells = [...s.ship.ownedCells, '1,0', '1,1', '1,2', '3,0', '3,1', '3,2', ...solarCells];
+  const solars = solarCells.map((cell, i) => ({ uid: 40 + i, defId: 'solar' as const, cell, level: 3 }));
   return {
     ...s, credits: 5000, items: { ...s.items, ore: 100, plate: 100 }, stats: { ...s.stats, sold: 5, rocks: 9, smelted: 3 },
     smashers: [{ ...s.smashers[0], repaired: true }],
     smelters: [{ uid: 3, paid: MODULES.smelter.costs[0], level: 1, on: true, progress: 0 }],
-    ship: { ...s.ship, ownedCells: cells, modules: [...s.ship.modules, { uid: 3, defId: 'smelter', cell: '2,2' }] },
+    ship: { ...s.ship, ownedCells: cells, modules: [...s.ship.modules, { uid: 3, defId: 'smelter', cell: '2,2' }, ...solars] },
   };
 }
 
@@ -92,7 +97,7 @@ describe('several Smasher units', () => {
   });
   it('auto-intake picks the roomiest level-2 Smasher', () => {
     let s = two();
-    s = { ...s, crusher: { ...s.crusher, rock: null }, bay: [dust()], smashers: s.smashers.map((m, i) => ({ ...m, level: 2, queue: i === 0 ? [dust()] : [] })), beams: [{ status: 'counting', remaining: 0.01, level: 1 }] };
+    s = { ...s, crusher: { ...s.crusher, rock: null }, bay: [dust()], smashers: s.smashers.map((m, i) => ({ ...m, level: 2, queue: i === 0 ? [dust()] : [] })), beams: [{ uid: 1, kind: 'tractor' as const, status: 'counting', remaining: 0.01, level: 1 }] };
     s = tick(s, 0.1, false).state;
     expect(s.smashers[1].queue.length + s.stats.smashed).toBeGreaterThan(0);
     expect(s.smashers[0].queue).toHaveLength(1);
@@ -141,15 +146,16 @@ describe('Move and Sell', () => {
     const base = rich();
     const a = placeModule(base, 'smelter', '1,0');
     if (!a.ok) throw new Error('x');
+    const uid = a.state.ship.modules[a.state.ship.modules.length - 1].uid;
     const up = upgradeSmelter(a.state, 1);
     if (!up.ok) throw new Error('up');
-    const refund = sellRefund(up.state, 4)!;
+    const refund = sellRefund(up.state, uid)!;
     expect(refund.credits).toBe(Math.floor(120 * SELL_REFUND) + Math.floor(40 * SELL_REFUND));
     expect(refund.items).toEqual({ plate: 3 });
-    const sold = sellModule(up.state, 4);
+    const sold = sellModule(up.state, uid);
     if (!sold.ok) throw new Error('sell');
     expect(sold.state.smelters).toHaveLength(1);
-    expect(sold.state.ship.modules.some((m) => m.uid === 4)).toBe(false);
+    expect(sold.state.ship.modules.some((m) => m.uid === uid)).toBe(false);
     expect(sold.state.credits).toBe(up.state.credits + refund.credits);
     expect(sold.events[0]).toMatchObject({ kind: 'module_sold', module: 'smelter' });
     // buying again costs the copy-2 price again (the count dropped)
@@ -162,7 +168,7 @@ describe('Move and Sell', () => {
     const a = placeModule(s, 'smasher', '1,0');
     if (!a.ok) throw new Error('x');
     const loaded = { ...a.state, smashers: a.state.smashers.map((m, i) => (i === 1 ? { ...m, queue: [dust(), dust()] } : m)) };
-    const sold = sellModule(loaded, 4);
+    const sold = sellModule(loaded, loaded.smashers[1].uid);
     if (!sold.ok) throw new Error('sell');
     expect(sold.state.items.ore).toBe(loaded.items.ore + 8);
     expect(sold.state.credits).toBe(loaded.credits + 375);
@@ -186,7 +192,7 @@ describe('save v6 -> v7', () => {
     const parsed = parseSave(JSON.stringify(v6));
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.state.version).toBe(7);
+    expect(parsed.state.version).toBe(8);
     expect(parsed.state.smashers).toEqual([{ uid: 2, paid: { credits: 0 }, repaired: true, level: 3, queue: [dust()] }]);
     expect(parsed.state.smelters).toEqual([{ uid: 3, paid: { credits: 0, items: { ore: 25 } }, level: 2, on: false, progress: 0.5 }]);
     expect('smasher' in parsed.state).toBe(false);

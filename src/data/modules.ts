@@ -1,6 +1,10 @@
 import type { Cost } from '../core/types';
 
-/** Buildable modules (1x1 until footprints arrive on Day 7). Credits buy speed, materials buy structure. */
+/**
+ * Buildable modules (all 1x1 for now; 2-tile footprints are a later slice). Credits buy speed, materials buy
+ * structure. `costs` lists the price of each copy; its length is the cap per ship.
+ * Placement: 'edge' needs a side facing open space, 'rear' needs its back (the right side on screen) open.
+ */
 export const MODULES = {
   beam: {
     name: 'Tractor Beam',
@@ -33,6 +37,34 @@ export const MODULES = {
       { credits: 0 },
       { credits: 500, items: { plate: 8 } },
       { credits: 1200, items: { plate: 20 } },
+    ] as Cost[],
+  },
+  /** Day 8: power. Each wing powers modules within its reach. */
+  solar: {
+    name: 'Solar Wing',
+    placement: 'edge' as const,
+    costs: [
+      { credits: 0, items: { plate: 6 } },
+      { credits: 0, items: { plate: 6 } },
+      { credits: 0, items: { plate: 8 } },
+      { credits: 0, items: { plate: 10 } },
+      { credits: 0, items: { plate: 12 } },
+      { credits: 0, items: { plate: 14 } },
+    ] as Cost[],
+  },
+  /** Day 8: travel. One per ship. */
+  engine: {
+    name: 'Engine',
+    placement: 'rear' as const,
+    costs: [{ credits: 0, items: { plate: 12 } }] as Cost[],
+  },
+  /** Day 8: Heavy rocks and Ice. Offered once the ship reaches the Rubble Belt. */
+  grapple: {
+    name: 'Grapple Beam',
+    placement: 'edge' as const,
+    costs: [
+      { credits: 0, items: { plate: 10, ore: 8 } },
+      { credits: 200, items: { plate: 16, ore: 12 } },
     ] as Cost[],
   },
 } as const;

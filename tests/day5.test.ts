@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { addBeam } from './helpers';
 import { currentGoal } from '../src/core/goals';
 import {
   handStats, sellAll, tapAllBeams, tapCrush, tick, toggleSmelter, upgradeBeam, upgradeHand, upgradeSmelter,
@@ -6,7 +7,7 @@ import {
 import { freeCells, freeEdgeCells, isEdgeCell, placeModule } from '../src/core/modules';
 import { availableQty, reserved, sellValue, structureGoal } from '../src/core/reserve';
 import { deserialize } from '../src/core/save';
-import { createInitialState } from '../src/core/state';
+import { createInitialState, SAVE_VERSION } from '../src/core/state';
 import type { GameState, Rock } from '../src/core/types';
 import { BAL, PRICES } from '../src/data/balance';
 import { HAND } from '../src/data/hand';
@@ -74,7 +75,7 @@ describe('module placement', () => {
     if (!r1.ok) return;
     s = r1.state;
     expect(s.beams).toHaveLength(2);
-    expect(s.beams[1]).toEqual({ status: 'idle', remaining: 0, level: 1 });
+    expect(s.beams[1]).toMatchObject({ kind: 'tractor', status: 'idle', remaining: 0, level: 1 });
     expect(s.credits).toBe(0);
     const r2 = placeModule(withItems(s, { plate: 6 }, 140), 'beam', '3,1');
     expect(r2.ok).toBe(true);
@@ -106,7 +107,9 @@ describe('Smelter', () => {
   it('never touches Ore reserved for the current goal', () => {
     // Smelter built, Smasher unrepaired: the goal needs Plate, so Ore is free. After repair, tile 4 needs 4 Ore.
     const base = smelterState({ smashers: [{ uid: 2, paid: { credits: 0 }, repaired: true, level: 1, queue: [] }], stats: { ...createInitialState().stats, sold: 1, sent: 1 } });
-    const s = { ...base, beams: [...base.beams, { status: 'idle' as const, remaining: 0, level: 1 }], items: { ...base.items, ore: 10 } };
+    // the early chain is done (second beam and an Engine), so the goal is the next hull tile
+    const b2 = addBeam(base);
+    const s = { ...b2, ship: { ...b2.ship, modules: [...b2.ship.modules, { uid: 60, defId: 'engine' as const, cell: 'e60' }] }, items: { ...base.items, ore: 10 } };
     expect(structureGoal(s)?.id).toBe('expand');
     expect(reserved(s).ore).toBe(4);
     const out = run(s, 120);
@@ -147,7 +150,7 @@ describe('Smelter', () => {
 describe('Tractor Beam levels and Fire all', () => {
   it('higher beam levels deliver richer rocks (+25% Ore per level)', () => {
     const ores = BEAM.levels.map((_, i) => {
-      const s = { ...createInitialState(), beams: [{ status: 'counting' as const, remaining: 0.01, level: i + 1 }] };
+      const s = { ...createInitialState(), beams: [{ uid: 1, kind: 'tractor' as const, status: 'counting' as const, remaining: 0.01, level: i + 1 }] };
       return tick(s, 0.1).state.crusher.rock!.ore;
     });
     expect(ores).toEqual([4, 5, 6, 7]);
@@ -171,7 +174,7 @@ describe('Tractor Beam levels and Fire all', () => {
   });
   it('Fire all starts every idle beam, and no longer needs an empty stage', () => {
     let s = createInitialState();
-    s = { ...s, beams: [...s.beams, { status: 'idle', remaining: 0, level: 1 }] };
+    s = addBeam(s);
     const fired = tapAllBeams(s).state;
     expect(fired.beams.map((b) => b.status)).toEqual(['counting', 'counting']);
     expect(fired.flags.tappedBeam).toBe(true);
@@ -180,7 +183,7 @@ describe('Tractor Beam levels and Fire all', () => {
   });
   it('two beams fire together: one rock for the stage and one waiting in the Bay', () => {
     let s = createInitialState();
-    s = { ...s, beams: [...s.beams, { status: 'idle', remaining: 0, level: 1 }] };
+    s = addBeam(s);
     const out = run(tapAllBeams(s).state, BAL.beamCountdown + 0.2);
     expect(out.crusher.rock).not.toBeNull();
     expect(out.bay).toHaveLength(1);
@@ -289,7 +292,7 @@ describe('save v3 -> v7', () => {
       smashers: [{ uid: 2, paid: { credits: 0 }, repaired: true, level: 2, queue: [] }],
     };
     const s = deserialize(JSON.stringify(old));
-    expect(s.version).toBe(7);
+    expect(s.version).toBe(SAVE_VERSION);
     expect(s.credits).toBe(777);
     expect(s.ship.modules.map((m) => m.defId)).toEqual(['beam', 'smasher']);
     expect(s.ship.ownedCells).toHaveLength(4);
@@ -311,7 +314,7 @@ describe('upgrade-ready dot', () => {
     expect(readyUpgrades({ ...s, credits: 25 })).toBe(1); // beam 25
     expect(readyUpgrades({ ...s, credits: 40 })).toBe(2); // beam + hand
     expect(readyUpgrades({ ...s, credits: 40, items: { ...s.items, plate: 8 } })).toBe(3); // + Smasher repair
-    const maxed = { ...s, credits: 9999, handLevel: 4, beams: [{ status: 'idle' as const, remaining: 0, level: 4 }] };
+    const maxed = { ...s, credits: 9999, handLevel: 4, beams: [{ uid: 1, kind: 'tractor' as const, status: 'idle' as const, remaining: 0, level: 4 }] };
     expect(readyUpgrades(maxed)).toBe(0);
   });
 });

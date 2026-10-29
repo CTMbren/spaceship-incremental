@@ -9,6 +9,11 @@ export const OFFLINE = {
     { upToSec: 2 * 3600, rate: 0.3 },
     { upToSec: 8 * 3600, rate: 0.1 },
   ],
+  /**
+   * Patch 7.2: Smelters only run for the first part of the time away (real seconds), then "go cold", so a
+   * return brings a pile of Ore to work through instead of only Plate.
+   */
+  smelterSec: 30 * 60,
   /** Fast-forward step (seconds). Coarse on purpose: offline is an abstraction, not a replay. */
   stepSec: 0.5,
 } as const;

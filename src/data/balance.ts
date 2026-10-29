@@ -4,7 +4,17 @@ import type { ItemId } from '../core/types';
 export const BAL = {
   baySlots: 3,
   beamCountdown: 1, // seconds, Tractor Beam level 1
-  rock: { dust: { hp: 35, ore: 4 } }, // hp x2.5 in patch 4.1 (hand time up; Smasher HP/s scaled to match)
+  /**
+   * Rock kinds. Dust is the Tractor Beam's rock everywhere (hp x2.5 in patch 4.1). Ice chunks and Heavy rocks
+   * appear from the Rubble Belt on (Day 8); Heavy rocks come only from the Grapple Beam. Big rocks are what a
+   * Grapple pulls where there are no Heavy rocks (2x a dust rock).
+   */
+  rock: {
+    dust: { hp: 35, ore: 4, ice: 0 },
+    ice: { hp: 35, ore: 1, ice: 2 },
+    heavy: { hp: 105, ore: 12, ice: 2 },
+    big: { hp: 70, ore: 8, ice: 0 },
+  },
   geode: {
     rate: 0.08, // chance any rock is a geode
     hpMul: 1.5,

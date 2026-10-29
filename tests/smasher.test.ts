@@ -30,8 +30,8 @@ describe('rebalanced numbers', () => {
     expect(BAL.rock.dust.hp).toBe(35);
     expect(BAL.rock.dust.hp / (1.6 * BAL.tapDmg)).toBeGreaterThan(20);
   });
-  it('the Smasher still needs ~15.6 s per dust rock at L1 (HP/s scaled with rock HP)', () => {
-    expect(BAL.rock.dust.hp / SMASHER.levels[0].hpPerSec).toBeCloseTo(15.6, 1);
+  it('the Smasher needs ~13 s per dust rock at L1 (Patch 7.2: +20% on every level)', () => {
+    expect(BAL.rock.dust.hp / SMASHER.levels[0].hpPerSec).toBeCloseTo(12.96, 1);
   });
 });
 
@@ -83,9 +83,9 @@ describe('sendToSmasher', () => {
 });
 
 describe('Smasher working', () => {
-  it('smashes the head rock at its HP/s and pays Ore (L1: 14 HP in 15.6 s)', () => {
+  it('smashes the head rock at its HP/s and pays Ore (L1: 35 HP in about 13 s)', () => {
     let s = base({ smashers: [{ uid: 2, paid: { credits: 0 }, repaired: true, level: 1, queue: [dust()] }], crusher: { ...createInitialState().crusher, rock: null } });
-    s = run(s, 15);
+    s = run(s, 12.5);
     expect(s.smashers[0].queue).toHaveLength(1);
     expect(s.items.ore).toBe(0);
     s = run(s, 1);
@@ -127,7 +127,7 @@ describe('Smasher working', () => {
 });
 
 describe('auto-intake (Smasher L2+)', () => {
-  const beamDone = (s: GameState): GameState => ({ ...s, beams: [{ status: 'counting', remaining: 0.01, level: 1 }] });
+  const beamDone = (s: GameState): GameState => ({ ...s, beams: [{ uid: 1, kind: 'tractor' as const, status: 'counting', remaining: 0.01, level: 1 }] });
   it('L1: rocks go to the Bay, never the queue', () => {
     const s = tick(beamDone(base({ crusher: { ...createInitialState().crusher, rock: null } })), 0.1).state;
     expect(s.smashers[0].queue).toHaveLength(0);

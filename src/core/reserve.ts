@@ -3,11 +3,14 @@ import { MODULES, SMELTER } from '../data/modules';
 import { SMASHER } from '../data/smasher';
 import { PRICES } from '../data/balance';
 import { nextTileCost } from './hull';
-import { freeCells, freeEdgeCells, moduleCost } from './modules';
+import { POWER } from '../data/power';
+import { freeCells, freeCellsFor, freeEdgeCells, moduleCost, moduleCount } from './modules';
+import { sparePower } from './power';
+import { hasVisited } from './travel';
 import { needsSmelter, smasherReady } from './units';
-import type { Cost, GameState, ItemId } from './types';
+import type { Cost, GameState, ItemId, ModuleId } from './types';
 
-export type StructureGoalId = 'smelter' | 'repair' | 'beam2' | 'expand';
+export type StructureGoalId = 'smelter' | 'repair' | 'solar' | 'beam2' | 'engine' | 'grapple' | 'expand';
 
 /**
  * The structure purchase the player is working toward next (after the first sell). Sell and the Smelter
@@ -21,11 +24,20 @@ export function structureGoal(s: GameState): { id: StructureGoalId; cost: Cost }
     return freeCells(s).length > 0 ? { id: 'smelter', cost: MODULES.smelter.costs[0] } : expand;
   }
   if (!smasherReady(s)) return { id: 'repair', cost: SMASHER.repair };
-  if (s.beams.length < 2) {
-    const cost = moduleCost(s, 'beam');
-    if (cost && freeEdgeCells(s).length > 0) return { id: 'beam2', cost };
+  // the next module of the early chain; a Solar Wing first whenever the ship lacks the power to run it
+  const build = (id: StructureGoalId, mod: ModuleId): { id: StructureGoalId; cost: Cost } | null => {
+    if (sparePower(s) < POWER.draw[mod]) {
+      const solar = moduleCost(s, 'solar');
+      if (solar && freeEdgeCells(s).length > 0) return { id: 'solar' as const, cost: solar };
+      return expand;
+    }
+    const cost = moduleCost(s, mod);
+    if (cost && freeCellsFor(s, mod).length > 0) return { id, cost };
     return expand;
-  }
+  };
+  if (s.beams.filter((b) => b.kind === 'tractor').length < 2) return build('beam2', 'beam');
+  if (moduleCount(s, 'engine') === 0) return build('engine', 'engine');
+  if (hasVisited(s, 'belt') && moduleCount(s, 'grapple') === 0) return build('grapple', 'grapple');
   return expand;
 }
 

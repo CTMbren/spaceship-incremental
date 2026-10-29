@@ -13,7 +13,10 @@ export const sellMode = (s: GameState): SellMode =>
 const GOAL_LABEL: Record<StructureGoalId, string> = {
   smelter: 'the Smelter',
   repair: 'the Smasher repair',
+  solar: 'a Solar Wing',
   beam2: 'your next beam',
+  engine: 'the Engine',
+  grapple: 'the Grapple Beam',
   expand: 'the next hull tile',
 };
 
