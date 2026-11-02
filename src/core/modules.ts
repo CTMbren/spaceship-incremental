@@ -1,4 +1,4 @@
-import { MODULES } from '../data/modules';
+import { MELTER_UNLOCK_TILES, MODULES } from '../data/modules';
 import { canAfford } from './actions';
 import { parseKey } from './hull';
 import { RANK } from '../data/jobs';
@@ -53,13 +53,16 @@ export function freeCellsFor(s: GameState, id: ModuleId): string[] {
 
 export const moduleCount = (s: GameState, id: ModuleId): number => s.ship.modules.filter((m) => m.defId === id).length;
 
-/** Is this module offered yet? The Engine after the second beam, the Grapple once the ship reaches the Rubble Belt. */
+/** Is this module offered yet? The Engine after the second beam, the Grapple once the ship reaches the Rubble Belt,
+ * the Ice Melter at the Belt with 10 hull tiles, the Fabricator once a Melter exists. */
 export function moduleUnlocked(s: GameState, id: ModuleId): boolean {
   if (moduleCount(s, id) > 0) return true;
   if (id === 'solar') return s.smelters.length > 0 || s.stats.smelted > 0;
   if (id === 'engine') return s.beams.filter((b) => b.kind === 'tractor').length >= 2;
   if (id === 'grapple') return hasVisited(s, 'belt');
   if (id === 'winch') return rank(s) >= RANK.winch;
+  if (id === 'melter') return hasVisited(s, 'belt') && s.ship.ownedCells.length >= MELTER_UNLOCK_TILES;
+  if (id === 'fab') return s.melters.length > 0 || s.stats.melted > 0;
   return true;
 }
 
@@ -95,11 +98,13 @@ export function placeModule(state: GameState, id: ModuleId, cell: string): Place
   s.credits -= cost.credits;
   for (const [k, v] of Object.entries(cost.items ?? {})) s.items[k as ItemId] -= v ?? 0;
   const uid = Math.max(0, ...s.ship.modules.map((m) => m.uid)) + 1;
-  const own = id === 'solar' || id === 'engine' || id === 'grapple' || id === 'winch';
+  const own = id === 'solar' || id === 'engine' || id === 'grapple' || id === 'winch' || id === 'beam';
   s.ship.modules.push({ uid, defId: id, cell, ...(own ? { paid: cost } : {}), ...(id === 'solar' || id === 'engine' ? { level: 1 } : {}) });
   if (id === 'beam') s.beams.push({ uid, kind: 'tractor', status: 'idle', remaining: 0, level: 1 });
   if (id === 'grapple') s.beams.push({ uid, kind: 'grapple', status: 'idle', remaining: 0, level: 1 });
   if (id === 'smelter') s.smelters.push({ uid, paid: cost, level: 1, on: true, progress: 0 });
+  if (id === 'melter') s.melters.push({ uid, paid: cost, level: 1, on: true, progress: 0 });
+  if (id === 'fab') s.fabs.push({ uid, paid: cost, level: 1, on: true, progress: 0 });
   if (id === 'smasher') s.smashers.push({ uid, paid: cost, repaired: true, level: 1, queue: [] }); // bought copies need no repair
   return { ok: true, state: s, events: [{ kind: 'built', module: id }] };
 }

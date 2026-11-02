@@ -61,16 +61,39 @@ Tile 9 is slower than before (7:57 -> 11:54) because Solar Wings and the Engine 
   - **Art gallery** at `?gallery`: every module in every state and level, the full hull with thrusters cycling, at 0.6x / 1x / 1.5x / 2.4x.
   - **Performance**: the static ship is baked into one image and only repainted when tiles, modules, levels, power or labels change (and re-baked sharp after a pinch); buy tiles and live effects stay separate. `?debug` shows an fps counter (bottom right). 193 tests.
 
+- Day 10 (v0.10.0; Ice Melter, Coolant, Fabricator, Circuits, beam Move/Sell; save v10):
+  - **Ice Melter** (any tile, 1 power; offered at the Rubble Belt once the hull has 10 tiles): 2 Ice -> 1 Coolant every 8 s. Up to 3: 12 Plate + 6 Ice, then 150 credits + 10 Plate + 6 Ice, then 450 + 20 Plate + 10 Ice. Levels Steam Jacket / Pressure Still / Plasma Kettle (100 / 300 / 900 credits, about 25% faster each). Coolant pays for hull tile 12.
+  - **Fabricator** (any tile, 2 power, 1x1 until 2-tile footprints arrive; offered once a Melter exists): 2 Plate + 1 Coolant -> 1 Circuit every 20 s. Up to 2: 20 Plate + 4 Coolant, then 400 credits + 30 Plate + 8 Coolant. Levels Twin Claw / Etch Line / Clean Room (150 / 450 / 1,350). Circuits pay for tiles 13-18, so **the whole 18-tile hull can now be finished**.
+  - Both work like the Smelter (one generic converter rule in `src/core/converters.ts`, data in `src/data/modules.ts`): shared stock, never touch what the current goal needs, ON/OFF from the tile (OFF draws no power), run for 30 minutes while you are away and then go cold. Tile sheet: what it makes, ON/OFF, upgrade, Move, Sell. Workshop lists them. New art and animations: a glass ice tank whose cubes melt with the batch, heater coil glow, steam, a Coolant vial that fills and drips; a circuit bench whose claw runs along a gantry and solders, the chip fills in, and a finished Circuit pops out. Both are in `?gallery`.
+  - **Goals**: Ice Melter, then Fabricator, then the hull again. A full ship never dead-ends: if the next tile needs Coolant or Circuits and there is no room for the module that makes them, the chip says "Make room for a Fabricator: tap a module and Sell or Move it" (and its materials stay reserved).
+  - **Reserves**: Sell now also keeps back the inputs for the goal's missing outputs (Ice for Coolant, Plate and Coolant for Circuits), shown in the Cargo sheet ("Kept 6 to make Coolant for the next hull tile"). Ice row tip: what Coolant is worth.
+  - **HUD**: Coolant (drop) and Circuit (chip) pills appear when first made; with 5-6 pills they shrink to fit.
+  - **Jobs** can ask for Coolant once the ship has a Melter (Quick jobs, and some Standard jobs).
+  - **Beams: Move and Sell.** Hold a beam or Grapple tile for half a second to open its sheet (Fire, upgrade, Move, Sell); a tap still fires it. A Tractor Beam sells for 75% while another stays (the last one cannot be sold). New beams remember their price.
+  - Sell buttons on module sheets show the credits; returned materials are listed in the line above (three items did not fit).
+  - Help cards: "Ice Melter, Coolant and Circuits" and "Moving and selling modules". Bot builds Melters and Fabricators, keeps tiles free for them, and places modules where they get power. 211 tests.
+
+Bot pacing after Day 10 (m:ss reached; 100 min run):
+
+| policy | Melter | tile 12 | Fabricator | tile 13 | tile 15 | tile 18 |
+|---|---|---|---|---|---|---|
+| engaged | 20:27 | 27:54 | 29:03 | 31:18 | 37:30 | 52:30 |
+| casual | 24:04 | 32:39 | 35:11 | 37:32 | 50:00 | 60:36 |
+| idle | 60:10 | 100:00 | 92:00 | - | - | - |
+
+The full hull lands at 52-61 minutes for active players, on the design target (50-60).
+
 ## Next
-0. **Graphics playtest** on the iPhone: open `?gallery` first, then play; check the fps counter with `?debug` on a full ship (target 60). Then Day 9 items: the Jobs tab (are the job sizes fair? is Hand over clear?), the rank-ups, the 4-slot Bay, swipe / pinch / double-tap on the ship, and that tile taps still feel instant.
-1. Day 10: **Ice Melter + Coolant** (hull tiles 12+; jobs can ask for Coolant). Day 11: **Veda Orbit + Rover**. Then Station Halcyon (Trader, Dry Dock) and the Jump.
-2. Small fixes waiting: Move/Sell buttons for beams and the Grapple; Auto-sell with keep floors; 2-tile footprints (Engine 2x1, Grapple 1x2).
-3. Watch: engaged players' Rep pace (maybe size jobs on a share of output that falls as output grows); credits still pile up late (~10k by minute 60).
+0. **Day 10 playtest** on the iPhone: fly to the Belt, grow to 10 tiles, build the Ice Melter and Fabricator, finish the hull; hold a beam tile to Move or Sell it; check the HUD pills fit. Day 9 and graphics items still open: job sizes and Hand over, swipe / pinch, fps on a full ship with `?debug`.
+1. Day 11: **Veda Orbit + Rover**. Then Station Halcyon (Trader, Dry Dock) and the Jump.
+2. Small fixes waiting: Auto-sell with keep floors; 2-tile footprints (Engine 2x1, Grapple 1x2, Fabricator 2x2).
+3. Watch: engaged players' Rep pace; credits pile up late (~25k by minute 60 now); **Core Shards pile up** (the engaged bot holds about 14 by minute 60; the design wants about 3 an hour; the guaranteed-shard pity and 4% chance on 1.5x Ring Fields geodes are the knobs, and they matter once the Jump spends Shards).
 
 ## Planned: Milestone 2 (planning only, see `docs/travel-shop-rover-jump-plan.md`)
 Travel along a system route (Engine, nodes, offline travel), Rover expeditions at planets, three shops (Workshop, Station Trader, Flux Exchange), Jump as shockwave damage with Braces instead of a reset, more modules. Proposed order: Days 8 to 12 after the Day 7 core-loop and layout playtest gate. Open decisions for Brendan are in section 9 of that doc.
 
 ## Known issues
+- Day 10: the Fabricator is 1x1 (the plan says 2x2) until footprints arrive. Long-press is only on beam and Grapple tiles (every other module opens its sheet on a tap). Selling a beam that is pulling a rock loses that rock. The engaged bot never taps Smash, so its saves show the "Smash a rock" chip; real players pass it early.
 - Day 9: the Jobs and Map sheets refresh once a second for their timers (never while a finger is down). Tile taps fire on finger-lift now, a few frames later than before. The Auto-Winch counts as a beam's neighbour only when it shares a side (not a corner).
 - Day 8: the Engine tile can sit under the right scroll arrow on a 390-wide screen (scroll to see it). Unpowered tiles show their old label faintly under the badge. Buying the tile behind an Engine does not move it, it keeps working (placement is checked when you build or Move, like beams). Power allocation is greedy (Solar Wings nearest first, then the hull in build order), so moving a Solar Wing can shift which module goes dark; the Power line and badges show the result.
 - Ship art is still code-drawn placeholder styling; the Tug template's nose is one tile off-centre (rows 1-2 of 5), so the silhouette is slightly lopsided. Module tiles are still labelled squares.

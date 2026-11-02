@@ -30,8 +30,8 @@ Footprints reconciled with the mockup: Crusher and Smelter are 1x1 in hull 1.
 | Smelter | 1x1 | any | -1 | 3 | 25 Ore (copy 2: 120 cr + 4 Plate, copy 3: 360 cr + 10 Plate) | Ore -> Plate (3:1). Max 3 per ship (Day 7), shared Ore stock, own upgrades, Move free, Sell 75%. Levels: Furnace, Draft Flue, Slag Recycler, Blast Chamber |
 | Solar Wing | 1x1 | edge | +2, reach 2 | 6 | 6 Plate | Power and Boost source |
 | Grapple Beam | 1x2 | edge | -1 | 9 | 10 Plate 8 Ore | 12s countdown, 2x rocks, can carry Ice |
-| Ice Melter | 1x1 | any | -1 | 20 | 12 Plate 6 Ice | Ice -> Coolant (2:1) |
-| Fabricator | 2x2 | any | -2 | 25 | 20 Plate 4 Coolant | 2 Plate + 1 Coolant -> Circuit; takes input only from Feed |
+| Ice Melter | 1x1 | any | -1 | 20 (Belt + 10 tiles, built Day 10) | 12 Plate 6 Ice | Ice -> Coolant (2:1), up to 3 |
+| Fabricator | 2x2 (1x1 until footprints) | any | -2 | 25 (after a Melter, built Day 10) | 20 Plate 4 Coolant | 2 Plate + 1 Coolant -> Circuit, up to 2; shares the stock (Feed-only input deferred) |
 | Auto-Winch | 1x1 | any | -1 | ~15-18 (offered after tile 9) | 14 Plate | Restarts adjacent beams on arrival. Circuit-free so it can unlock at min 18 |
 | Reactor | 2x2 | any | +8, reach 3 | 36 | 16 Plate 8 Circuit 4 Coolant | Big power and Boost source |
 | Jump Drive | 2x2 | rear | -3 | visible ~44 | 30 Plate 10 Circuit 2 Shard | Triggers the Jump. Demolish refunds 100% |

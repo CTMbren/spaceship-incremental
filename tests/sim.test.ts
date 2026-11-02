@@ -31,6 +31,15 @@ describe('economy pacing (headless bot)', () => {
     expect(m.hauler!).toBeGreaterThan(8 * 60);
     expect(m.hauler!).toBeLessThan(25 * 60);
   });
+  it('Day 10: the Ice Melter and Fabricator open the back half of the hull (no dead end at 11 or 12 tiles)', () => {
+    const m = runSim('engaged', 45).milestones;
+    expect(m.melter!).toBeGreaterThan(12 * 60);
+    expect(m.melter!).toBeLessThan(32 * 60);
+    expect(m.fab!).toBeGreaterThan(m.melter!);
+    expect(m.fab!).toBeLessThan(40 * 60);
+    expect(m.tiles[13]).toBeDefined();
+    expect(m.tiles[15]).toBeDefined();
+  }, 60_000);
   it('the bot is deterministic', () => {
     expect(runSim('engaged', 5).final).toEqual(runSim('engaged', 5).final);
   });

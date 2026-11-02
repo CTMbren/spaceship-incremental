@@ -10,8 +10,9 @@ import { evaluatePower, powerMul, type PowerInfo } from './power';
 import { availableQty, SELLABLE, smeltableQty } from './reserve';
 import { nextRandom } from './rng';
 import { travelStep, zoneOf } from './travel';
+import { CONVERTER_IDS, CONVERTERS, unitsOf } from './converters';
 import { roomiestSmasher, smasherCap, smasherReady } from './units';
-import type { BeamState, GameEvent, GameState, ItemId, Rock, RockKind } from './types';
+import type { BeamState, ConverterId, GameEvent, GameState, ItemId, Rock, RockKind } from './types';
 
 export interface Outcome {
   state: GameState;
@@ -212,29 +213,40 @@ export function tick(state: GameState, dt: number, forceGeode?: boolean, opts: T
     }
   }
 
-  // Smelters: each turns Ore into Plate in batches from the shared stock, never touching Ore reserved for the current goal.
-  for (const sm of s.smelters) {
-    const mul = powerMul(s, power, sm.uid);
-    if (!sm.on || opts.smelt === false || mul <= 0) continue;
-    const secPerBatch = SMELTER.levels[sm.level - 1].secPerBatch / mul;
-    let t = dt;
-    while (t > 1e-12) {
-      if (smeltableQty(s, 'ore') < SMELTER.batchIn) {
-        sm.progress = 0; // starved: wait for Ore
-        break;
-      }
-      const need = (1 - sm.progress) * secPerBatch;
-      if (t >= need - 1e-9) {
-        t = Math.max(0, t - need);
-        s.items.ore -= SMELTER.batchIn;
-        s.items.plate += SMELTER.batchOut;
-        noteMade(s, 'plate', SMELTER.batchOut);
-        s.stats.smelted += SMELTER.batchOut;
-        sm.progress = 0;
-        events.push({ kind: 'smelted', plate: SMELTER.batchOut, uid: sm.uid });
-      } else {
-        sm.progress += t / secPerBatch;
-        t = 0;
+  // Converters (Smelters, then Ice Melters, then Fabricators): batches from the shared stock, never touching what the
+  // current goal needs. Offline they all go cold after a while (opts.smelt).
+  for (const id of CONVERTER_IDS) {
+    const def = CONVERTERS[id];
+    const inputs = Object.entries(def.inputs) as [ItemId, number][];
+    for (const sm of unitsOf(s, id)) {
+      const mul = powerMul(s, power, sm.uid);
+      if (!sm.on || opts.smelt === false || mul <= 0) continue;
+      const secPerBatch = def.levels[sm.level - 1].secPerBatch / mul;
+      let t = dt;
+      while (t > 1e-12) {
+        if (inputs.some(([item, n]) => smeltableQty(s, item) < n)) {
+          sm.progress = 0; // starved: wait for input
+          break;
+        }
+        const need = (1 - sm.progress) * secPerBatch;
+        if (t >= need - 1e-9) {
+          t = Math.max(0, t - need);
+          for (const [item, n] of inputs) s.items[item] -= n;
+          s.items[def.output] += def.outQty;
+          noteMade(s, def.output, def.outQty);
+          sm.progress = 0;
+          if (id === 'smelter') {
+            s.stats.smelted += def.outQty;
+            events.push({ kind: 'smelted', plate: def.outQty, uid: sm.uid });
+          } else {
+            if (id === 'melter') s.stats.melted += def.outQty;
+            else s.stats.fabbed += def.outQty;
+            events.push({ kind: 'converted', module: id, item: def.output, qty: def.outQty, uid: sm.uid });
+          }
+        } else {
+          sm.progress += t / secPerBatch;
+          t = 0;
+        }
       }
     }
   }
@@ -509,7 +521,7 @@ export function setHoldForGoal(state: GameState, on: boolean): Outcome {
 
 // ---- upgrades (credits buy speed) ----------------------------------------------------
 
-export function levelUp(state: GameState, level: number, levels: readonly { cost: { credits: number } }[], apply: (s: GameState) => void, what: 'beam' | 'smelter' | 'smasher' | 'hand' | 'solar' | 'engine'): SpendResult {
+export function levelUp(state: GameState, level: number, levels: readonly { cost: { credits: number } }[], apply: (s: GameState) => void, what: 'beam' | 'smelter' | 'smasher' | 'hand' | 'solar' | 'engine' | 'melter' | 'fab'): SpendResult {
   const next = levels[level];
   if (!next) return { ok: false, reason: 'max_level' };
   const afford = canAfford(state, next.cost);
@@ -567,6 +579,27 @@ export function upgradeModule(state: GameState, uid: number): SpendResult {
     const mm = s.ship.modules.find((x) => x.uid === uid)!;
     mm.level = (mm.level ?? 1) + 1;
   }, what);
+}
+
+/** Next upgrade cost of an Ice Melter or Fabricator (any converter). */
+export const nextConverterUpgrade = (s: GameState, id: ConverterId, index: number) => {
+  const u = unitsOf(s, id)[index];
+  return u ? CONVERTERS[id].levels[u.level]?.cost : undefined;
+};
+
+export function upgradeConverter(state: GameState, id: ConverterId, index: number): SpendResult {
+  const u = unitsOf(state, id)[index];
+  if (!u) return { ok: false, reason: 'need_items' };
+  return levelUp(state, u.level, CONVERTERS[id].levels, (s) => { unitsOf(s, id)[index].level += 1; }, id);
+}
+
+export function toggleConverter(state: GameState, id: ConverterId, index: number): Outcome {
+  if (!unitsOf(state, id)[index]) return { state, events: [] };
+  const s = clone(state);
+  const u = unitsOf(s, id)[index];
+  u.on = !u.on;
+  if (!u.on) u.progress = 0;
+  return { state: s, events: [] };
 }
 
 export function toggleSmelter(state: GameState, index = 0): Outcome {

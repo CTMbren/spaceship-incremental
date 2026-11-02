@@ -1,5 +1,6 @@
 import { POWER, SOLAR } from '../data/power';
 import { parseKey } from './hull';
+import { isConverter, unitsOf } from './converters';
 import type { GameState, ModuleInstance } from './types';
 
 /** Derived every time it is needed; never saved (CLAUDE.md: derived values are recomputed). */
@@ -20,10 +21,10 @@ export interface PowerInfo {
 
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
 
-/** What a module draws right now. A Rusty Smasher and a Smelter switched OFF draw nothing. */
+/** What a module draws right now. A Rusty Smasher and a converter switched OFF draw nothing. */
 export function moduleDraw(s: GameState, m: ModuleInstance): number {
   if (m.defId === 'smasher' && !s.smashers.find((u) => u.uid === m.uid)?.repaired) return 0;
-  if (m.defId === 'smelter' && !s.smelters.find((u) => u.uid === m.uid)?.on) return 0;
+  if (isConverter(m.defId) && !unitsOf(s, m.defId).find((u) => u.uid === m.uid)?.on) return 0;
   return POWER.draw[m.defId];
 }
 

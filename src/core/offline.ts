@@ -131,7 +131,7 @@ export function applyOffline(state: GameState, nowMs: number): { state: GameStat
       items,
       smasherRusty: !smasherReady(state),
       geodeWaiting: !!after.crusher.rock?.geode,
-      smeltersCooled: counted > OFFLINE.smelterSec && state.smelters.some((m) => m.on),
+      smeltersCooled: counted > OFFLINE.smelterSec && [...state.smelters, ...state.melters, ...state.fabs].some((m) => m.on),
       arrived: ff.arrived.map((n) => ROUTE[n].name),
       stillCruising: after.travel.dest !== null,
     },

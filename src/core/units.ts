@@ -1,4 +1,5 @@
-import { SELL_REFUND, SMELTER } from '../data/modules';
+import { BEAM, MODULES, SELL_REFUND } from '../data/modules';
+import { CONVERTERS, converterOf, isConverter, unitsOf } from './converters';
 import { SOLAR } from '../data/power';
 import { SMASHER } from '../data/smasher';
 import { ENGINE, GRAPPLE } from '../data/travel';
@@ -30,7 +31,11 @@ export function roomiestSmasher(s: GameState, minLevel = 1, powered?: ReadonlySe
 }
 
 export const unitOfModule = (s: GameState, uid: number): SmasherState | SmelterState | undefined =>
-  s.smashers.find((m) => m.uid === uid) ?? s.smelters.find((m) => m.uid === uid);
+  s.smashers.find((m) => m.uid === uid) ?? converterOf(s, uid)?.unit;
+
+/** Tractor Beams can be sold while another one stays (the ship always keeps a beam). */
+export const canSellBeam = (s: GameState, uid: number): boolean =>
+  s.beams.some((b) => b.uid === uid && b.kind === 'tractor') && s.beams.filter((b) => b.kind === 'tractor').length > 1;
 
 const scale = (cost: Cost, k: number): Cost => ({
   credits: Math.floor(cost.credits * k),
@@ -39,8 +44,8 @@ const scale = (cost: Cost, k: number): Cost => ({
 
 /**
  * What selling a module would pay: 75% of what it cost plus 75% of the credits spent upgrading it.
- * Sellable: Smelters, bought Smashers, Solar Wings, the Engine (while parked) and Grapple Beams. Tractor Beams
- * and the ship's own Smasher stay.
+ * Sellable: converters, bought Smashers, Solar Wings, the Engine (while parked), Grapple Beams and Tractor Beams
+ * (while another stays). The ship's own Smasher stays.
  */
 export function sellRefund(s: GameState, uid: number): Cost | null {
   const mod = s.ship.modules.find((m) => m.uid === uid);
@@ -48,13 +53,26 @@ export function sellRefund(s: GameState, uid: number): Cost | null {
   let paid: Cost | undefined;
   let level = 1;
   let levels: readonly { cost: { credits: number } }[] = [];
-  if (mod.defId === 'smelter' || mod.defId === 'smasher') {
+  if (isConverter(mod.defId)) {
+    const c = converterOf(s, uid);
+    if (!c) return null;
+    paid = c.unit.paid;
+    level = c.unit.level;
+    levels = CONVERTERS[c.id].levels;
+  } else if (mod.defId === 'smasher') {
     const unit = unitOfModule(s, uid);
     if (!unit) return null;
-    if (mod.defId === 'smasher' && s.smashers[0]?.uid === uid) return null; // the ship's own Smasher stays
+    if (s.smashers[0]?.uid === uid) return null; // the ship's own Smasher stays
     paid = unit.paid;
     level = unit.level;
-    levels = mod.defId === 'smelter' ? SMELTER.levels : SMASHER.levels;
+    levels = SMASHER.levels;
+  } else if (mod.defId === 'beam') {
+    if (!canSellBeam(s, uid)) return null;
+    // beams built before Day 10 did not record their price: use the price of their place in the beam list
+    const i = s.ship.modules.filter((m) => m.defId === 'beam').indexOf(mod);
+    paid = mod.paid ?? MODULES.beam.costs[i] ?? { credits: 0 };
+    level = s.beams.find((b) => b.uid === uid)?.level ?? 1;
+    levels = BEAM.levels;
   } else if (mod.defId === 'winch') {
     paid = mod.paid;
   } else if (mod.defId === 'solar' || mod.defId === 'engine') {
@@ -107,9 +125,10 @@ export function sellModule(state: GameState, uid: number): UnitResult {
       s.items.ice += r.ice ?? 0;
     }
     s.smashers = s.smashers.filter((m) => m.uid !== uid);
-  } else if (mod.defId === 'smelter') {
-    s.smelters = s.smelters.filter((m) => m.uid !== uid);
-  } else if (mod.defId === 'grapple') {
+  } else if (isConverter(mod.defId)) {
+    const list = unitsOf(s, mod.defId);
+    list.splice(list.findIndex((m) => m.uid === uid), 1);
+  } else if (mod.defId === 'grapple' || mod.defId === 'beam') {
     s.beams = s.beams.filter((b) => b.uid !== uid);
   }
   s.ship.modules = s.ship.modules.filter((m) => m.uid !== uid);

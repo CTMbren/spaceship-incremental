@@ -6,7 +6,7 @@ import { hasVisited, inTransit, ROUTE } from './travel';
 import type { GameEvent, GameState, ItemId, Job, JobsState } from './types';
 
 /** Items a job can ask for, in display order. */
-export const JOB_ITEMS: readonly ItemId[] = ['ore', 'plate', 'ice'];
+export const JOB_ITEMS: readonly ItemId[] = ['ore', 'plate', 'ice', 'coolant'];
 
 export function initialJobs(seed: number): JobsState {
   return { unlocked: false, rep: 0, rankPaid: 0, seed, slots: [], refill: [], skipCd: [], rate: {}, made: {}, seen: {}, done: 0 };
@@ -70,6 +70,7 @@ function roundUp(item: ItemId, n: number): number {
 
 const canMakePlate = (s: GameState): boolean => s.smelters.length > 0 || s.stats.smelted > 0;
 const canGetIce = (s: GameState): boolean => s.items.ice > 0 || hasVisited(s, 'belt');
+const canMakeCoolant = (s: GameState): boolean => s.melters.length > 0 || s.stats.melted > 0;
 
 /** Credits a job pays: its sell value times the kind's premium (+10% from the Salvager rank). */
 export function jobPay(s: GameState, kind: JobKind, wants: Job['wants']): number {
@@ -93,7 +94,8 @@ export function makeJob(s: GameState, kind: JobKind): Job | null {
     const pool = CLIENTS.generic as string[];
     client = pool[Math.floor(rand(s) * pool.length)];
     if (kind === 'quick') {
-      const opts: [ItemId, number][] = [['ore', 2], ...(canMakePlate(s) ? [['plate', 1] as [ItemId, number]] : []), ...(canGetIce(s) ? [['ice', 1] as [ItemId, number]] : [])];
+      const opts: [ItemId, number][] = [['ore', 2], ...(canMakePlate(s) ? [['plate', 1] as [ItemId, number]] : []), ...(canGetIce(s) ? [['ice', 1] as [ItemId, number]] : []),
+        ...(canMakeCoolant(s) ? [['coolant', 1] as [ItemId, number]] : [])];
       const total = opts.reduce((n, [, w]) => n + w, 0);
       let r = rand(s) * total;
       let pick: ItemId = 'ore';
@@ -102,6 +104,7 @@ export function makeJob(s: GameState, kind: JobKind): Job | null {
     } else {
       shares = { ore: 1, ...(canMakePlate(s) ? { plate: 1 } : {}) };
       if (canGetIce(s) && rand(s) < 0.3) shares.ice = 1;
+      if (canMakeCoolant(s) && rand(s) < JOBS.coolantChance) shares.coolant = JOBS.coolantShare; // no extra draw before a Melter
     }
   }
   const wants: Job['wants'] = {};

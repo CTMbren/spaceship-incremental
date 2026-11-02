@@ -131,6 +131,11 @@ export function parseSave(raw: string | null): { ok: true; state: GameState } | 
       // v8 -> v9 (Day 9): the Job Board. It opens on the next tick if the ship already has its second beam.
       cur = { ...cur, jobs: cur.jobs ?? initialJobs(((cur.rng ?? 1) ^ 0x5eed) >>> 0), version: 9 };
     }
+    if (cur.version < 10) {
+      // v9 -> v10 (Day 10): Ice Melters and Fabricators, and their stats.
+      const stats = { ...createInitialState().stats, ...(cur.stats ?? {}) };
+      cur = { ...cur, melters: cur.melters ?? [], fabs: cur.fabs ?? [], stats, version: 10 };
+    }
     return { ok: true, state: { ...createInitialState(), ...cur } as GameState };
   } catch {
     return { ok: false };

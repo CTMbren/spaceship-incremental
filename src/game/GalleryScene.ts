@@ -25,6 +25,8 @@ const ROWS: { kind: ArtKind; name: string; period: number; extra?: Partial<Cells
   { kind: 'grapple', name: 'Grapple Beam', period: 6 },
   { kind: 'smasher', name: 'Rock Smasher', period: 3, extra: { rusty: true, working: false, level: 1 }, extraTitle: 'Rusty' },
   { kind: 'smelter', name: 'Smelter', period: 3 },
+  { kind: 'melter', name: 'Ice Melter', period: 4 },
+  { kind: 'fab', name: 'Fabricator', period: 5 },
   { kind: 'solar', name: 'Solar Wing', period: 3 },
   { kind: 'engine', name: 'Engine', period: 3, extra: { cruising: true, working: true, level: 2 }, extraTitle: 'Cruising' },
   { kind: 'winch', name: 'Auto-Winch', period: 3 },
@@ -141,7 +143,7 @@ export class GalleryScene extends Phaser.Scene {
       const flash = sp.working && sp.powered ? Math.max(0, 1 - ((t % sp.period) / 0.6)) : 0;
       drawFx(this.fx, sp.kind, c.x, c.y, {
         t, dir: c.dir, level: sp.level, working: sp.working, progress: p, powered: sp.powered, boosted: sp.boosted,
-        flash: sp.kind === 'beam' || sp.kind === 'grapple' || sp.kind === 'smelter' ? flash : 0, calm: false, rusty: sp.rusty,
+        flash: sp.kind === 'beam' || sp.kind === 'grapple' || sp.kind === 'smelter' || sp.kind === 'melter' || sp.kind === 'fab' ? flash : 0, calm: false, rusty: sp.rusty,
         cruising: sp.cruising, targets: sp.kind === 'winch' ? ['left', 'right'] : undefined,
       });
     }

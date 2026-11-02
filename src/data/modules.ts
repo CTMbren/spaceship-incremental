@@ -1,4 +1,4 @@
-import type { Cost } from '../core/types';
+import type { Cost, ItemId } from '../core/types';
 
 /**
  * Buildable modules (all 1x1 for now; 2-tile footprints are a later slice). Credits buy speed, materials buy
@@ -76,6 +76,25 @@ export const MODULES = {
       { credits: 300, items: { plate: 20 } },
     ] as Cost[],
   },
+  /** Day 10: Ice Melter. Offered at the Rubble Belt once the hull has 10 tiles (tile 12 needs Coolant). */
+  melter: {
+    name: 'Ice Melter',
+    placement: 'any' as const,
+    costs: [
+      { credits: 0, items: { plate: 12, ice: 6 } },
+      { credits: 150, items: { plate: 10, ice: 6 } },
+      { credits: 450, items: { plate: 20, ice: 10 } },
+    ] as Cost[],
+  },
+  /** Day 10: Fabricator. Offered once an Ice Melter is built (tiles 13-18 need Circuits). 1x1 until 2-tile footprints arrive. */
+  fab: {
+    name: 'Fabricator',
+    placement: 'any' as const,
+    costs: [
+      { credits: 0, items: { plate: 20, coolant: 4 } },
+      { credits: 400, items: { plate: 30, coolant: 8 } },
+    ] as Cost[],
+  },
 } as const;
 
 /** Share of a module's price (and its upgrade credits) paid back when it is sold. */
@@ -102,3 +121,34 @@ export const SMELTER = {
     { name: 'Blast Chamber', secPerBatch: 3.07, cost: { credits: 360 } as Cost },
   ],
 } as const;
+
+/**
+ * Day 10 converters. Same rules as the Smelter: batches from the shared stock, never touching what the current
+ * goal needs, x1 x3 x9 upgrade credits, each level about 25% faster.
+ */
+export const MELTER = {
+  inputs: { ice: 2 } as Partial<Record<ItemId, number>>,
+  output: 'coolant' as ItemId,
+  outQty: 1,
+  levels: [
+    { name: 'Heat Coil', secPerBatch: 8, cost: { credits: 0 } as Cost },
+    { name: 'Steam Jacket', secPerBatch: 6.4, cost: { credits: 100 } as Cost },
+    { name: 'Pressure Still', secPerBatch: 5.12, cost: { credits: 300 } as Cost },
+    { name: 'Plasma Kettle', secPerBatch: 4.1, cost: { credits: 900 } as Cost },
+  ],
+} as const;
+
+export const FAB = {
+  inputs: { plate: 2, coolant: 1 } as Partial<Record<ItemId, number>>,
+  output: 'circuit' as ItemId,
+  outQty: 1,
+  levels: [
+    { name: 'Bench Arm', secPerBatch: 20, cost: { credits: 0 } as Cost },
+    { name: 'Twin Claw', secPerBatch: 16, cost: { credits: 150 } as Cost },
+    { name: 'Etch Line', secPerBatch: 12.8, cost: { credits: 450 } as Cost },
+    { name: 'Clean Room', secPerBatch: 10.2, cost: { credits: 1350 } as Cost },
+  ],
+} as const;
+
+/** Hull tiles the ship needs before the Ice Melter is offered (at the Rubble Belt or later). */
+export const MELTER_UNLOCK_TILES = 10;

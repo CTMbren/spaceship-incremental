@@ -36,6 +36,21 @@ export const HELP: readonly HelpCard[] = [
     ],
   },
   {
+    title: 'Ice Melter, Coolant and Circuits',
+    lines: [
+      'At the Rubble Belt, once your hull has 10 tiles, you can build an Ice Melter: 2 Ice make 1 Coolant. Hull tile 12 needs Coolant.',
+      'Then the Fabricator: 2 Plate and 1 Coolant make 1 Circuit. The last hull tiles need Circuits.',
+      'Like the Smelter they never use what your next goal needs, and you can switch them off from their tiles.',
+    ],
+  },
+  {
+    title: 'Moving and selling modules',
+    lines: [
+      'Tap a module (or hold a beam tile, since a tap fires it) to open its sheet. Move picks it up: tap a glowing Open tile to drop it. Free.',
+      'Sell pays back 75% of what it cost and of its upgrades. Your last Tractor Beam and the ship\'s own Smasher stay.',
+    ],
+  },
+  {
     title: 'Power and Solar Wings',
     lines: [
       'Beams, Smashers, Smelters and the Engine need power. The hull makes 3. Power 4/5 at the top of the ship shows what you use and what you have.',

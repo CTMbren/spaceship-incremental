@@ -1,8 +1,8 @@
 import { SMASHER } from '../data/smasher';
-import { MODULES } from '../data/modules';
+import { MELTER_UNLOCK_TILES, MODULES } from '../data/modules';
 import { HULLS } from '../data/hulls';
 import { nextTileCost } from './hull';
-import { freeCells, freeEdgeCells, moduleCost, moduleCount } from './modules';
+import { freeCells, freeEdgeCells, moduleCost, moduleCount, moduleUnlocked } from './modules';
 import { sparePower } from './power';
 import { structureGoal } from './reserve';
 import { hasDeparted, hasVisited, inTransit, ROUTE } from './travel';
@@ -16,8 +16,8 @@ export interface Goal {
 }
 
 /**
- * The next hull tile needs something the player cannot get yet (Ice before the Rubble Belt; Coolant, Circuits and
- * Shards are not in the game yet), so "Expand hull" would be a dead end.
+ * The next hull tile needs something the player cannot get yet (Ice before the Rubble Belt, Coolant without an Ice Melter,
+ * Circuits without a Fabricator), so "Expand hull" would be a dead end.
  */
 export function tileOutOfReach(s: GameState): boolean {
   const tile = nextTileCost(HULLS[s.ship.hullId], s.ship.ownedCells.length);
@@ -26,7 +26,9 @@ export function tileOutOfReach(s: GameState): boolean {
     if (s.items[k as keyof GameState['items']] >= (v ?? 0)) return false;
     if (k === 'ore' || k === 'plate') return false;
     if (k === 'ice') return !hasVisited(s, 'belt');
-    return true;
+    if (k === 'coolant') return s.melters.length === 0; // Coolant needs a Melter on the ship
+    if (k === 'circuit') return s.fabs.length === 0; // Circuits need a Fabricator
+    return false; // Core Shards come from geodes
   });
 }
 
@@ -77,6 +79,15 @@ export function currentGoal(s: GameState): Goal | null {
     const hint = freeCells(s).length > 0 ? ` · ${why}` : '';
     return tile ? { id: 'expand', text: `Expand hull · ${costText(tile)}${hint}` } : null;
   }
+  // Day 10: Ice Melter (Coolant for tile 12), then the Fabricator (Circuits for tiles 13-18)
+  if (sg?.id === 'melter' || sg?.id === 'fab') {
+    const name = sg.id === 'melter' ? 'an Ice Melter' : 'a Fabricator';
+    if (freeCells(s).length === 0) return { id: 'make-room', text: `Make room for ${name}: tap a module and Sell or Move it` };
+    return { id: sg.id, text: `Build ${name} · ${costText(sg.cost)}` };
+  }
+  if (sg?.id === 'solar' && (moduleUnlocked(s, 'melter') && moduleCount(s, 'melter') === 0 || moduleUnlocked(s, 'fab') && moduleCount(s, 'fab') === 0)) {
+    return { id: 'solar', text: `Add power: build a Solar Wing · ${costText(sg.cost)} · outside tile` };
+  }
   return null;
 }
 
@@ -96,6 +107,16 @@ export function chipText(s: GameState): string {
   const tile = nextTileCost(HULLS[s.ship.hullId], s.ship.ownedCells.length);
   if (tile && tileOutOfReach(s)) {
     if (!hasVisited(s, 'belt')) return `Next: Fly to the ${ROUTE[1].name} for Ice (bigger hull tiles)`;
+    if (!moduleUnlocked(s, 'melter')) return `Next: Grow the hull to ${MELTER_UNLOCK_TILES} tiles for the Ice Melter`;
+    // the next tile needs Coolant or Circuits and the ship has no room for the module that makes them
+    const missing = (tile.items?.coolant && s.melters.length === 0) ? 'melter' : (tile.items?.circuit && s.fabs.length === 0) ? 'fab' : null;
+    if (missing) {
+      const name = MODULES[missing].name;
+      if (!moduleUnlocked(s, missing)) return `Next: Build an Ice Melter first, then a ${name}`;
+      return freeCells(s).length > 0
+        ? `Next: Build a ${name} on an Open tile · ${costText(moduleCost(s, missing) ?? { credits: 0 })}`
+        : `Next: Make room for a ${name}: tap a module and Sell or Move it`;
+    }
     return 'Hull is as big as it gets for now';
   }
   if (tile) return `Next: Expand hull · ${costText(tile)}${freeCells(s).length > 0 ? ' · Open tiles are not outside tiles' : ''}`;

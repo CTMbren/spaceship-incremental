@@ -19,8 +19,11 @@ export const JOBS = {
   /** Share of the player's output a job asks for (8 min x 0.35 of 30 Ore/min = about 85 Ore). */
   share: 0.35,
   /** Production per minute a job assumes at least (x floorMul), so a slow start still gets real jobs. */
-  par: { ore: 30, plate: 4, ice: 4 } as Partial<Record<ItemId, number>>,
+  par: { ore: 30, plate: 4, ice: 4, coolant: 2 } as Partial<Record<ItemId, number>>,
   floorMul: 0.7,
+  /** Day 10: once the ship has an Ice Melter, a Standard job asks for some Coolant this often (share 0.5). */
+  coolantChance: 0.3,
+  coolantShare: 0.5,
   /** Amounts round up to this step (5 Ore, not 47). Plate and Ice under 20 round to 1. */
   roundTo: 5,
   /** Seconds of play before an empty slot gets a new job. */

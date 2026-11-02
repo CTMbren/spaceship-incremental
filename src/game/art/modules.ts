@@ -7,7 +7,7 @@
 import { C } from '../palette';
 import { DIR_V, INK, S, along, disc, frame, grey, hazard, plate, polyAlong, rivet, tint, type Dir, type G } from './kit';
 
-export type ArtKind = 'beam' | 'grapple' | 'smasher' | 'smelter' | 'solar' | 'engine' | 'winch' | 'open';
+export type ArtKind = 'beam' | 'grapple' | 'smasher' | 'smelter' | 'solar' | 'engine' | 'winch' | 'melter' | 'fab' | 'open';
 
 export interface BodyOpts {
   level: number;
@@ -42,7 +42,7 @@ const STEEL = 0x8fa0be;
 const DARK_STEEL = 0x5c6b8a;
 const HOUSING = 0x3d4a6b;
 const FACE: Record<ArtKind, number> = {
-  beam: 0x22304e, grapple: 0x17393b, smasher: 0x3b2a26, smelter: 0x3a2a24, solar: 0x14223f, engine: 0x2a2342, winch: 0x3a3020, open: 0x18223f,
+  beam: 0x22304e, grapple: 0x17393b, smasher: 0x3b2a26, smelter: 0x3a2a24, solar: 0x14223f, engine: 0x2a2342, winch: 0x3a3020, melter: 0x1d3346, fab: 0x1d3a2c, open: 0x18223f,
 };
 
 const col = (c: number, dark?: boolean) => (dark ? grey(c) : c);
@@ -109,6 +109,32 @@ export function drawBody(g: G, kind: ArtKind, x: number, y: number, o: BodyOpts)
       g.fillStyle(INK, 1).fillRoundedRect(x + 18, y + 30, 14, 13, { tl: 7, tr: 7, bl: 1, br: 1 });
       g.fillStyle(0x1a1010, 1).fillRoundedRect(x + 19.5, y + 31.5, 11, 11.5, { tl: 5.5, tr: 5.5, bl: 0, br: 0 });
       plate(g, x + 38, y + 38, 8, 4, 1, col(STEEL, d), 1.2);
+      break;
+    }
+    case 'melter': {
+      // a glass ice tank on a heater base, a pipe to a Coolant vial on the right
+      plate(g, x + 11, y + 37, 26, 8, 2, col(DARK_STEEL, d), 1.5);
+      for (const xx of [15, 21, 27, 33]) g.fillStyle(INK, 0.8).fillRect(x + xx, y + 39.5, 2.5, 3);
+      g.fillStyle(INK, 1).fillRoundedRect(x + 12, y + 10, 24, 28, 7);
+      g.fillStyle(col(0x2a4a66, d), 1).fillRoundedRect(x + 14, y + 12, 20, 24, 5.5);
+      g.fillStyle(col(0x9fd8ff, d), 0.35).fillRoundedRect(x + 16, y + 14, 4, 18, 2); // glass glint
+      g.fillStyle(INK, 1).fillRoundedRect(x + 16, y + 8, 16, 4, 2);
+      g.lineStyle(3, INK, 1).lineBetween(x + 35, y + 30, x + 41, y + 30).lineBetween(x + 41, y + 30, x + 41, y + 34);
+      g.lineStyle(1.6, col(STEEL, d), 1).lineBetween(x + 35, y + 30, x + 41, y + 30).lineBetween(x + 41, y + 30, x + 41, y + 34);
+      g.fillStyle(INK, 1).fillRoundedRect(x + 37, y + 34, 9, 12, 3);
+      g.fillStyle(col(0x18223f, d), 1).fillRoundedRect(x + 38.5, y + 35.5, 6, 9, 2);
+      break;
+    }
+    case 'fab': {
+      // a work bench with a circuit board, a gantry rail along the top and pins along the board's edge
+      plate(g, x + 10, y + 22, 36, 22, 3, col(0x2f6b48, d));
+      g.lineStyle(1.2, col(0xa8e6bf, d), 0.6);
+      g.lineBetween(x + 14, y + 28, x + 26, y + 28).lineBetween(x + 26, y + 28, x + 30, y + 34).lineBetween(x + 30, y + 34, x + 42, y + 34);
+      g.lineBetween(x + 14, y + 38, x + 22, y + 38).lineBetween(x + 22, y + 38, x + 22, y + 32);
+      for (const [xx, yy] of [[14, 28], [42, 34], [14, 38], [22, 32]]) g.fillStyle(col(0xffc83d, d), 1).fillCircle(x + xx, y + yy, 1.4);
+      for (let i = 0; i < 6; i++) g.fillStyle(INK, 0.85).fillRect(x + 13 + i * 5.5, y + 44.5, 2.5, 2.5);
+      plate(g, x + 9, y + 10, 38, 5, 2, col(STEEL, d), 1.5);
+      for (const xx of [11, 45]) g.fillStyle(INK, 1).fillRect(x + xx - 1, y + 14, 2.5, 9);
       break;
     }
     case 'solar': {
@@ -250,6 +276,60 @@ export function drawFx(g: G, kind: ArtKind, x: number, y: number, o: FxOpts): vo
       if (o.boosted && o.powered) sparks(g, cx, cy, 15, t);
       break;
     }
+    case 'melter': {
+      // ice chunks in the tank shrink with the batch, the heater coil glows, Coolant drips into the vial
+      const busy = o.working && o.powered;
+      const left = busy ? 1 - o.progress : 1;
+      const ice = o.powered ? 0xd9f2ff : grey(0xd9f2ff);
+      const cubes = [[19, 30, 4.2], [28, 31, 3.8], [23, 22.5, 3.6], [29.5, 22, 2.8]] as const;
+      for (const [dx, dy, r] of cubes) {
+        const rr = r * (0.35 + 0.65 * left);
+        g.fillStyle(INK, 0.9).fillRoundedRect(x + dx - rr - 1.2, y + dy - rr - 1.2, 2 * rr + 2.4, 2 * rr + 2.4, 1.5);
+        g.fillStyle(tint(ice, -0.12), 1).fillRoundedRect(x + dx - rr, y + dy - rr, 2 * rr, 2 * rr, 1);
+        g.fillStyle(ice, 1).fillRoundedRect(x + dx - rr, y + dy - rr, 2 * rr - 1.2, 2 * rr - 1.6, 1);
+        g.fillStyle(0xffffff, 0.9).fillRect(x + dx - rr + 0.8, y + dy - rr + 0.8, rr * 0.7, 1.1);
+      }
+      if (busy) {
+        g.fillStyle(GLOW, 0.55 + 0.35 * Math.sin(t * 9)).fillRect(x + 14, y + 42.5, 20, 1.6);
+        const n = o.calm ? 1 : 2;
+        for (let i = 0; i < n; i++) {
+          const ph = (t * 0.6 + i / n) % 1;
+          g.fillStyle(0xe6ecff, 0.4 * (1 - ph)).fillCircle(x + 22 + i * 6 + Math.sin(t * 2 + i) * 2 * ph, y + 7 - ph * 16, 2 + 3 * ph);
+        }
+      }
+      // the vial: blue Coolant level follows the batch; a drop falls when one is made
+      const fill = busy ? 2 + 6 * o.progress : 2;
+      g.fillStyle(o.powered ? C.power : grey(C.power), 1).fillRect(x + 38.5, y + 44.5 - fill, 6, fill);
+      if (flash > 0) g.fillStyle(C.power, flash).fillCircle(x + 41.5, y + 34 + 8 * (1 - flash), 2);
+      if (o.boosted && o.powered) sparks(g, cx, cy, 15, t);
+      break;
+    }
+    case 'fab': {
+      // the claw head runs along the gantry, dips to the board and solders; a Circuit pops out when one is done
+      const busy = o.working && o.powered;
+      const hx = busy ? x + 16 + 24 * (0.5 + 0.5 * Math.sin(t * 2.2)) : x + 28;
+      const dip = busy ? 3 + 3 * Math.max(0, Math.sin(t * 6.6)) : 0;
+      g.fillStyle(INK, 1).fillRect(hx - 5, y + 11, 10, 7);
+      g.fillStyle(o.powered ? 0xcfd8ea : grey(0xcfd8ea), 1).fillRect(hx - 4, y + 12, 8, 5);
+      g.lineStyle(2, INK, 1).lineBetween(hx, y + 17, hx, y + 22 + dip);
+      g.lineStyle(2, INK, 1).lineBetween(hx - 3, y + 22 + dip, hx, y + 25 + dip).lineBetween(hx + 3, y + 22 + dip, hx, y + 25 + dip);
+      if (busy && Math.sin(t * 6.6) > 0.6) {
+        g.fillStyle(0xffe08a, 0.9).fillCircle(hx, y + 27 + dip, 1.8);
+        if (!o.calm) g.fillStyle(0xffffff, 0.8).fillCircle(hx + 3, y + 25 + dip, 0.9).fillCircle(hx - 3, y + 26 + dip, 0.9);
+      }
+      // the chip being built fills in with the batch
+      const w = 10 * (busy ? o.progress : 0);
+      g.fillStyle(INK, 0.9).fillRect(x + 32, y + 26, 11, 7);
+      if (w > 0) g.fillStyle(0x6fd08c, 1).fillRect(x + 32.5, y + 26.5, w, 6);
+      if (flash > 0) {
+        const k = 1 - flash;
+        const yy = y + 26 - 14 * k;
+        g.fillStyle(0x6fd08c, flash).fillRect(x + 34, yy, 8, 6);
+        g.fillStyle(0xffffff, flash * 0.8).fillRect(x + 35, yy + 1, 2, 1.5);
+      }
+      if (o.boosted && o.powered) sparks(g, cx, cy, 15, t);
+      break;
+    }
     case 'solar': {
       // a light sweep from cell to cell across the panel
       const cells: [number, number][] = [[0, 0], [1, 0], [2, 0], [2, 1], [1, 1], [0, 1]];
@@ -345,5 +425,5 @@ function sparks(g: G, cx: number, cy: number, r: number, t: number): void {
 
 /** Label under a module's art when "Show labels" is on. */
 export const ART_LABEL: Record<ArtKind, string> = {
-  beam: 'Beam', grapple: 'Grapple', smasher: 'Smash', smelter: 'Smelt', solar: 'Solar', engine: 'Engine', winch: 'Winch', open: 'Open',
+  beam: 'Beam', grapple: 'Grapple', smasher: 'Smash', smelter: 'Smelt', solar: 'Solar', engine: 'Engine', winch: 'Winch', melter: 'Melt', fab: 'Fab', open: 'Open',
 };

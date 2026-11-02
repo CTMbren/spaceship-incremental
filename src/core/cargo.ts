@@ -1,6 +1,9 @@
 import { PRICES } from '../data/balance';
-import { SMELTER } from '../data/modules';
-import { availableQty, reservedQty, SELLABLE, smeltFeedReserve, structureGoal, type StructureGoalId } from './reserve';
+import { MELTER, SMELTER } from '../data/modules';
+
+/** What an input is kept back to make (Cargo sheet note). */
+const FEEDS_INTO: Partial<Record<ItemId, string>> = { ore: 'Plate', ice: 'Coolant', plate: 'Circuits', coolant: 'Circuits' };
+import { availableQty, feedReserves, reservedQty, SELLABLE, structureGoal, type StructureGoalId } from './reserve';
 import type { GameState, ItemId } from './types';
 
 /** `quick`: one tap sells everything (only Ore so far, before the Smelter). `cargo`: the Sell button opens the Cargo sheet. */
@@ -17,6 +20,8 @@ const GOAL_LABEL: Record<StructureGoalId, string> = {
   beam2: 'your next beam',
   engine: 'the Engine',
   grapple: 'the Grapple Beam',
+  melter: 'the Ice Melter',
+  fab: 'the Fabricator',
   expand: 'the next hull tile',
 };
 
@@ -37,6 +42,9 @@ export interface CargoRow {
 const owned = (s: GameState, item: ItemId): boolean => {
   if (item === 'ore') return s.items.ore > 0 || s.stats.rocks > 0;
   if (item === 'plate') return s.items.plate > 0 || s.stats.smelted > 0;
+  if (item === 'ice') return s.items.ice > 0 || s.melters.length > 0;
+  if (item === 'coolant') return s.items.coolant > 0 || s.stats.melted > 0;
+  if (item === 'circuit') return s.items.circuit > 0 || s.stats.fabbed > 0;
   return s.items[item] > 0;
 };
 
@@ -45,20 +53,22 @@ export function cargoRows(s: GameState): CargoRow[] {
   const goal = structureGoal(s);
   const why = goal ? GOAL_LABEL[goal.id] : 'your goal';
   const rows: CargoRow[] = [];
+  const feeds = feedReserves(s);
   for (const item of SELLABLE) {
     if (!owned(s, item)) continue;
     const count = Math.floor(s.items[item]);
     const surplus = availableQty(s, item);
     const direct = Math.min(count, reservedQty(s, item));
-    const feed = item === 'ore' ? Math.min(count - direct, smeltFeedReserve(s)) : 0;
+    const feed = Math.min(count - direct, feeds[item] ?? 0);
+    const makes = FEEDS_INTO[item] ?? 'goods';
     const kept = count - surplus;
     let keptNote = '';
-    if (direct > 0 && feed > 0) keptNote = `Kept ${direct} for ${why}, ${feed} to make Plate`;
+    if (direct > 0 && feed > 0) keptNote = `Kept ${direct} for ${why}, ${feed} to make ${makes}`;
     else if (direct > 0) keptNote = `Kept ${direct} for ${why}`;
-    else if (feed > 0) keptNote = `Kept ${feed} to make Plate for ${why}`;
-    const tip = item === 'ore' && s.smelters.length > 0 && count > 0
-      ? `Smelter: ${SMELTER.batchIn} Ore makes ${SMELTER.batchOut} Plate worth ${SMELTER.batchOut * PRICES.plate} credits`
-      : '';
+    else if (feed > 0) keptNote = `Kept ${feed} to make ${makes} for ${why}`;
+    let tip = '';
+    if (item === 'ore' && s.smelters.length > 0 && count > 0) tip = `Smelter: ${SMELTER.batchIn} Ore makes ${SMELTER.batchOut} Plate worth ${SMELTER.batchOut * PRICES.plate} credits`;
+    if (item === 'ice' && s.melters.length > 0 && count > 0) tip = `Ice Melter: ${MELTER.inputs.ice} Ice makes ${MELTER.outQty} Coolant worth ${PRICES.coolant} credits`;
     rows.push({ item, count, price: PRICES[item], surplus, kept, keptNote, forSale: true, tip });
   }
   if (s.items.core_shard > 0) {

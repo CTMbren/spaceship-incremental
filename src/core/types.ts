@@ -22,7 +22,10 @@ export interface HullDef {
   tileCosts: Cost[];
 }
 
-export type ModuleId = 'beam' | 'smasher' | 'smelter' | 'solar' | 'engine' | 'grapple' | 'winch';
+export type ModuleId = 'beam' | 'smasher' | 'smelter' | 'solar' | 'engine' | 'grapple' | 'winch' | 'melter' | 'fab';
+
+/** Modules that turn items into other items in batches (Day 10: Ice Melter and Fabricator join the Smelter). */
+export type ConverterId = 'smelter' | 'melter' | 'fab';
 
 /** A module sitting on one owned tile (1x1 modules only until footprints arrive). */
 export interface ModuleInstance {
@@ -152,6 +155,9 @@ export interface SmelterState {
   progress: number;
 }
 
+/** An Ice Melter or Fabricator unit (Day 10): the same shape as a Smelter. */
+export type ConverterState = SmelterState;
+
 export interface Stats {
   rocks: number;
   geodes: number;
@@ -162,6 +168,9 @@ export interface Stats {
   smashed: number;
   overheats: number;
   smelted: number;
+  /** Coolant made by Ice Melters, Circuits made by Fabricators (Day 10). */
+  melted: number;
+  fabbed: number;
 }
 
 export interface GameState {
@@ -178,6 +187,9 @@ export interface GameState {
   /** One unit per Smasher / Smelter module, in the order they were built. Shared Ore stock, separate levels. */
   smashers: SmasherState[];
   smelters: SmelterState[];
+  /** Day 10: Ice Melters (2 Ice -> 1 Coolant) and Fabricators (2 Plate + 1 Coolant -> 1 Circuit). */
+  melters: ConverterState[];
+  fabs: ConverterState[];
   /** Hand Tools level 1..4 (Workshop). */
   handLevel: number;
   stats: Stats;
@@ -212,10 +224,11 @@ export type GameEvent =
   | { kind: 'arrived'; node: number }
   | { kind: 'repaired' }
   | { kind: 'smelted'; plate: number; uid?: number }
+  | { kind: 'converted'; module: ConverterId; item: ItemId; qty: number; uid: number }
   | { kind: 'built'; module: ModuleId }
   | { kind: 'module_sold'; module: ModuleId; credits: number }
   | { kind: 'module_moved'; module: ModuleId }
-  | { kind: 'upgraded'; what: 'beam' | 'smelter' | 'smasher' | 'hand' | 'solar' | 'engine'; level: number }
+  | { kind: 'upgraded'; what: 'beam' | 'smelter' | 'smasher' | 'hand' | 'solar' | 'engine' | 'melter' | 'fab'; level: number }
   | { kind: 'smasher_upgraded'; level: number }
   | { kind: 'crushed'; ore: number; ice?: number; geode: boolean; credits: number; shard: boolean }
   | { kind: 'sold'; item: ItemId; qty: number; credits: number };

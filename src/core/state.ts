@@ -4,7 +4,7 @@ import { cellKey } from './hull';
 import { initialJobs } from './jobs';
 import type { GameState, ItemId } from './types';
 
-export const SAVE_VERSION = 9;
+export const SAVE_VERSION = 10;
 export const ITEM_IDS: readonly ItemId[] = ['ore', 'ice', 'plate', 'coolant', 'circuit', 'core_shard'];
 
 export function createInitialState(seed = 1): GameState {
@@ -27,8 +27,10 @@ export function createInitialState(seed = 1): GameState {
     crusher: { rock: null, heat: 0, lockout: 0, holding: false, holdT: 0, holdAcc: 0, weakT: 0, weakX: 0, weakY: 0 },
     smashers: [{ uid: 2, paid: { credits: 0 }, repaired: false, level: 1, queue: [] }],
     smelters: [],
+    melters: [],
+    fabs: [],
     handLevel: 1,
-    stats: { rocks: 0, geodes: 0, sold: 0, taps: 0, holdTicks: 0, sent: 0, smashed: 0, overheats: 0, smelted: 0 },
+    stats: { rocks: 0, geodes: 0, sold: 0, taps: 0, holdTicks: 0, sent: 0, smashed: 0, overheats: 0, smelted: 0, melted: 0, fabbed: 0 },
     pity: 0,
     flags: { tappedBeam: false, usedHold: false, holdForGoal: true, powerNotice: 0 },
     travel: { node: 0, dest: null, progress: 0, visited: [0] },
