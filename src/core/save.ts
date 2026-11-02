@@ -142,6 +142,10 @@ export function parseSave(raw: string | null): { ok: true; state: GameState } | 
       const fresh = createInitialState();
       cur = { ...cur, items: { ...fresh.items, ...(cur.items ?? {}) }, rover: cur.rover ?? initialRover(((cur.rng ?? 1) ^ 0x50e) >>> 0), version: 11 };
     }
+    if (cur.version < 12) {
+      // v11 -> v12 (Day 12): Station Halcyon paints. The hull id may now also be 'hauler'.
+      cur = { ...cur, station: cur.station ?? { paints: [], paint: null }, version: 12 };
+    }
     return { ok: true, state: { ...createInitialState(), ...cur } as GameState };
   } catch {
     return { ok: false };

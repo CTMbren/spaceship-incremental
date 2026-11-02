@@ -12,6 +12,7 @@ import { nextRandom } from './rng';
 import { travelStep, zoneOf } from './travel';
 import { CONVERTER_IDS, CONVERTERS, unitsOf } from './converters';
 import { roverStep } from './rover';
+import { sellCredits } from './station';
 import { roomiestSmasher, smasherCap, smasherReady } from './units';
 import type { BeamState, ConverterId, GameEvent, GameState, ItemId, Rock, RockKind } from './types';
 
@@ -474,7 +475,7 @@ export function sell(state: GameState, item: ItemId, qty?: number): Outcome {
   const n = Math.min(qty ?? have, have);
   if (n <= 0) return { state, events: [] };
   const s = clone(state);
-  const credits = n * PRICES[item];
+  const credits = sellCredits(s, item, n);
   s.items[item] -= n;
   s.credits += credits;
   s.stats.sold += n;
@@ -489,7 +490,7 @@ export function sellSelected(state: GameState, items: readonly ItemId[]): Outcom
     if (!items.includes(item)) continue;
     const n = availableQty(state, item);
     if (n <= 0) continue;
-    const credits = n * PRICES[item];
+    const credits = sellCredits(s, item, n);
     s.items[item] -= n;
     s.credits += credits;
     s.stats.sold += n;
@@ -510,7 +511,7 @@ export function sellQty(state: GameState, item: ItemId, qty: number): Outcome {
   const n = Math.min(Math.floor(qty), availableQty(state, item));
   if (n <= 0) return { state, events: [] };
   const s = clone(state);
-  const credits = n * PRICES[item];
+  const credits = sellCredits(s, item, n);
   s.items[item] -= n;
   s.credits += credits;
   s.stats.sold += n;

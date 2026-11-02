@@ -53,6 +53,14 @@ export const HELP: readonly HelpCard[] = [
     ],
   },
   {
+    title: 'Station Halcyon: Trader and Dry Dock',
+    lines: [
+      'Fly on from Veda Orbit to Station Halcyon. Open the Map while docked for the Trader and the Dry Dock.',
+      'The Trader pays 20% more for Plate, Coolant, Circuits, Glass Sand and Amber Resin while you are docked, sells materials in packs of 5 (handy when a tile needs something you cannot make), and sells hull paints.',
+      'The Dry Dock turns the full Tug into a Hauler: two new rows at the stern, room for 28 tiles. Every tile and module stays where it is.',
+    ],
+  },
+  {
     title: 'Moving and selling modules',
     lines: [
       'Tap a module (or hold a beam tile, since a tap fires it) to open its sheet. Move picks it up: tap a glowing Open tile to drop it. Free.',

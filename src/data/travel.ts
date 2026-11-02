@@ -49,9 +49,9 @@ export const SYSTEM = {
       blurb: 'The planet Veda. Build a Rover Bay and send the Rover down for Glass Sand, Amber Resin and Relics.',
     },
     {
-      id: 'station', name: 'Station Halcyon', type: 'station', legSec: 8 * 60, open: false,
-      tractor: [{ kind: 'dust', w: 1 }], grapple: 'heavy', oreMul: 1, geodeMul: 1,
-      blurb: 'Trader and Dry Dock. Later update.',
+      id: 'station', name: 'Station Halcyon', type: 'station', legSec: 8 * 60, open: true,
+      tractor: [{ kind: 'dust', w: 0.85 }, { kind: 'ice', w: 0.15 }], grapple: 'heavy', oreMul: 1.1, geodeMul: 1,
+      blurb: 'The Trader (better prices for refined goods, materials for sale, paint) and the Dry Dock (a bigger hull).',
     },
     {
       id: 'jump', name: 'Jump Point', type: 'jump', legSec: 8 * 60, open: false,

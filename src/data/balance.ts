@@ -19,8 +19,9 @@ export const BAL = {
     rate: 0.08, // chance any rock is a geode
     hpMul: 1.5,
     jackpotOreMul: 6, // credits = ore * oreprice * this (about 24; was 19 until the Day 5 pacing sim)
-    shardChance: 0.04,
-    pity: 12, // every 12th geode is guaranteed to hold a Core Shard
+    // Day 12: was 4% and every 12th (about 10 Shards an hour for an active player); now about 3-4 an hour
+    shardChance: 0.015,
+    pity: 40, // every 40th geode without one is guaranteed to hold a Core Shard
   },
   weak: {
     cycle: 1.2, // a weak point cycle, seconds

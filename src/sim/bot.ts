@@ -12,13 +12,15 @@ import {
 } from '../core/loop';
 import { freeCells, freeCellsFor, moduleCost, moduleCount, moduleUnlocked, placeModule } from '../core/modules';
 import { evaluatePower, sparePower } from '../core/power';
-import { buyAttachment, canLaunch, collectHaul, launchRover } from '../core/rover';
+import { atStation, buyPack, convertHull, dockCheck, packCost } from '../core/station';
+import { structureGoal } from '../core/reserve';
+import { atOrbit, buyAttachment, canLaunch, collectHaul, launchRover } from '../core/rover';
 import { ATTACHMENTS } from '../data/rover';
 import { canDepart, depart, hasVisited, inTransit } from '../core/travel';
 import { canDeliver, deliverJob, rank } from '../core/jobs';
 import { RANK } from '../data/jobs';
 import { POWER } from '../data/power';
-import type { ModuleId } from '../core/types';
+import type { ItemId, ModuleId } from '../core/types';
 import { SELLABLE, sellValue } from '../core/reserve';
 import { needsSmelter, smasherReady } from '../core/units';
 import { createInitialState } from '../core/state';
@@ -43,6 +45,9 @@ export interface Milestones {
   contractor?: number;
   melter?: number;
   orbit?: number;
+  station?: number;
+  /** The Dry Dock conversion (Tug to Hauler hull); not the Hauler rank. */
+  drydock?: number;
   roverBay?: number;
   fab?: number;
   /** tiles owned -> seconds when reached */
@@ -61,6 +66,8 @@ export interface SimResult {
 /** From this many tiles on the bot also buys Smelter and Smasher copies (tiles 10-11 need Ice from the Rubble Belt). */
 const HULL_END = 9;
 const DT = 0.1;
+/** Rover trips the bot makes at Veda before flying on to the Station. */
+const BOT_ROVER_TRIPS = 5;
 /** How often the policy looks at the screen (seconds) and how often it spends. */
 const LOOK: Record<Policy, number> = { engaged: 0.3, casual: 2.5, idle: 0.3 };
 const SPEND: Record<Policy, number> = { engaged: 3, casual: 10, idle: 10 };
@@ -104,6 +111,8 @@ function travel(s: GameState): GameState {
   if (inTransit(s) || !canDepart(s).ok) return s;
   if (hasVisited(s, 'belt') && moduleCount(s, 'grapple') === 0) return s; // farm the Belt with a Grapple first
   if (hasVisited(s, 'belt') && s.ship.ownedCells.length < 11) return s; // and buy the Ice tiles there
+  // at Veda: build the Rover Bay and stay for a few trips (the goods pay for attachments and the Dry Dock)
+  if (atOrbit(s) && (moduleCount(s, 'rover') === 0 || s.rover.trips < BOT_ROVER_TRIPS)) return s;
   return depart(s).state;
 }
 
@@ -147,6 +156,20 @@ function spend(s0: GameState): GameState {
         const r = buyAttachment(s, want);
         if (r.ok) { s = r.state; continue; }
       }
+    }
+    // Day 12: at the Station, buy packs of whatever the goal is short of (keeping half the credits for the goal)
+    if (atStation(s)) {
+      const goal = structureGoal(s);
+      const short = (Object.entries(goal?.cost.items ?? {}) as [ItemId, number][]).find(([k, v]) => s.items[k] < v && packCost(k));
+      if (short && s.credits - packCost(short[0])!.credits >= (goal?.cost.credits ?? 0)) {
+        const r = buyPack(s, short[0]);
+        if (r.ok) { s = r.state; continue; }
+      }
+    }
+    // Day 12: the Dry Dock as soon as it is affordable (the Hauler's 10 new tile spaces)
+    if (dockCheck(s).ok) {
+      const r = convertHull(s);
+      if (r.ok) { s = r.state; continue; }
     }
     // the Auto-Winch next to a beam once the Contractor rank allows it
     if (moduleCount(s, 'winch') === 0 && rank(s) >= RANK.winch) {
@@ -197,9 +220,9 @@ function spend(s0: GameState): GameState {
 /** The Rover: collect a haul, then send it down again. */
 function rover(s0: GameState): GameState {
   let s = s0.rover.status === 'back' ? collectHaul(s0).state : s0;
-  if (canLaunch(s).ok) {
+  if (canLaunch(s).ok && s.rover.trips < BOT_ROVER_TRIPS) { // then it leaves Veda for the Station
     // Dunes for the Sand that buys Wheels and Drill, the Crater for the Resin that buys the Battery, then the Ruins
-    const site = s.rover.owned.length < 2 ? 'dunes' : s.rover.owned.length < 3 ? 'crater' : 'ruins';
+    const site = s.rover.owned.length < 2 ? 'dunes' : s.rover.owned.length < 3 ? 'crater' : s.items.sand < 16 ? 'dunes' : 'ruins';
     s = launchRover(s, site).state;
   }
   return s;
@@ -248,7 +271,8 @@ export function runSim(policy: Policy, minutes: number, seed = 1): SimResult {
       // while saving Plate for the next Smasher copy the bot keeps its Plate and the Ore the Smelter turns into it
       const need = moduleCost(s, 'smasher')?.items?.plate ?? 0;
       const saving = s.ship.ownedCells.length >= HULL_END && moduleCount(s, 'engine') > 0 && smasherReady(s) && s.smashers.length < 3 && freeCells(s).length > tilesToKeep(s);
-      const goods = (i: string) => (i === 'sand' || i === 'resin' || i === 'circuit') && moduleCount(s, 'rover') > 0 && s.rover.owned.length < 3; // they buy attachments
+      // planet goods and Circuits buy attachments, the Dry Dock and Hauler tiles
+      const goods = (i: string) => (i === 'sand' || i === 'resin' || i === 'circuit') && moduleCount(s, 'rover') > 0;
       const sellItems = SELLABLE.filter((i) => !goods(i) && !(saving && (i === 'plate' || (i === 'ore' && s.items.plate < need)))); // Ore feeds the Smelter
       if (sellValue(s, sellItems) > 0) {
         const o = sellSelected(s, sellItems);
@@ -272,6 +296,8 @@ export function runSim(policy: Policy, minutes: number, seed = 1): SimResult {
     if (ms.contractor === undefined && rank(s) >= RANK.winch) ms.contractor = t;
     if (ms.melter === undefined && moduleCount(s, 'melter') > 0) ms.melter = t;
     if (ms.orbit === undefined && hasVisited(s, 'orbit')) ms.orbit = t;
+    if (ms.station === undefined && hasVisited(s, 'station')) ms.station = t;
+    if (ms.drydock === undefined && s.ship.hullId === 'hauler') ms.drydock = t;
     if (ms.roverBay === undefined && moduleCount(s, 'rover') > 0) ms.roverBay = t;
     if (ms.fab === undefined && moduleCount(s, 'fab') > 0) ms.fab = t;
     const n = s.ship.ownedCells.length;

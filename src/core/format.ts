@@ -9,6 +9,9 @@ export function fmtNum(n: number): string {
   return v < 1_000_000 ? unit(v / 1000, 'k') : unit(v / 1_000_000, 'M');
 }
 
+/** A per-unit price: whole numbers as they are, others to one decimal (9.6). Pure. */
+export const fmtPrice = (n: number): string => (Math.abs(n - Math.round(n)) < 1e-9 ? String(Math.round(n)) : n.toFixed(1));
+
 /** "v0.6.1 (e2c9fbb, Oct 28)": the build line shown in the menu. Pure; the scene passes the build constants. */
 export function formatVersion(version: string, sha: string, isoDate: string): string {
   const d = new Date(isoDate);

@@ -1,4 +1,5 @@
 import { PRICES } from '../data/balance';
+import { sellPrice } from './station';
 import { MELTER, SMELTER } from '../data/modules';
 
 /** What an input is kept back to make (Cargo sheet note). */
@@ -23,6 +24,7 @@ const GOAL_LABEL: Record<StructureGoalId, string> = {
   melter: 'the Ice Melter',
   fab: 'the Fabricator',
   rover: 'the Rover Bay',
+  drydock: 'the Dry Dock',
   expand: 'the next hull tile',
 };
 
@@ -70,7 +72,7 @@ export function cargoRows(s: GameState): CargoRow[] {
     let tip = '';
     if (item === 'ore' && s.smelters.length > 0 && count > 0) tip = `Smelter: ${SMELTER.batchIn} Ore makes ${SMELTER.batchOut} Plate worth ${SMELTER.batchOut * PRICES.plate} credits`;
     if (item === 'ice' && s.melters.length > 0 && count > 0) tip = `Ice Melter: ${MELTER.inputs.ice} Ice makes ${MELTER.outQty} Coolant worth ${PRICES.coolant} credits`;
-    rows.push({ item, count, price: PRICES[item], surplus, kept, keptNote, forSale: true, tip });
+    rows.push({ item, count, price: sellPrice(s, item), surplus, kept, keptNote, forSale: true, tip });
   }
   if (s.items.core_shard > 0) {
     rows.push({ item: 'core_shard', count: Math.floor(s.items.core_shard), price: PRICES.core_shard, surplus: 0, kept: 0, keptNote: '', forSale: false, tip: '' });

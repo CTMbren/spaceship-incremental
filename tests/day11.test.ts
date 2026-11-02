@@ -91,7 +91,7 @@ describe('Veda Orbit and the Rover Bay', () => {
     expect(currentGoal(s)?.id).toBe('rover-go');
     s = run(launched(s, 'dunes'), SITES.dunes.sec, 5);
     expect(currentGoal(s)?.id).toBe('rover-collect');
-    expect(currentGoal(collectHaul(s).state)).toBeNull();
+    expect(currentGoal(collectHaul(s).state)?.id).toBe('to-station'); // Day 12: then on to Station Halcyon
   });
 });
 

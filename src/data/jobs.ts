@@ -54,6 +54,7 @@ export const CLIENTS = {
   scrapyard: 'Scrapyard reclaimers',
   belt: "Belt miners' co-op",
   rings: 'Veda ring surveyors',
+  station: 'Halcyon quartermaster',
 } as Record<string, string | string[]>;
 
 /** What a Local job asks for at each field (shares of the job; the rest of the field's items do not appear). */
@@ -61,4 +62,5 @@ export const LOCAL_WANTS: Record<string, Partial<Record<ItemId, number>>> = {
   scrapyard: { ore: 1.5 },
   belt: { ice: 1, ore: 0.5 },
   rings: { plate: 1, ice: 1 },
+  station: { plate: 1, coolant: 0.5 },
 };

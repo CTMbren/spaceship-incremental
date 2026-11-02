@@ -5,7 +5,7 @@ import { initialJobs } from './jobs';
 import { initialRover } from './rover';
 import type { GameState, ItemId } from './types';
 
-export const SAVE_VERSION = 11;
+export const SAVE_VERSION = 12;
 export const ITEM_IDS: readonly ItemId[] = ['ore', 'ice', 'plate', 'coolant', 'circuit', 'core_shard', 'sand', 'resin'];
 
 export function createInitialState(seed = 1): GameState {
@@ -31,6 +31,7 @@ export function createInitialState(seed = 1): GameState {
     melters: [],
     fabs: [],
     rover: initialRover((seed ^ 0x50e) >>> 0),
+    station: { paints: [], paint: null },
     handLevel: 1,
     stats: { rocks: 0, geodes: 0, sold: 0, taps: 0, holdTicks: 0, sent: 0, smashed: 0, overheats: 0, smelted: 0, melted: 0, fabbed: 0 },
     pity: 0,

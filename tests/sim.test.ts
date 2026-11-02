@@ -46,6 +46,14 @@ describe('economy pacing (headless bot)', () => {
     expect(r.milestones.roverBay!).toBeLessThan(50 * 60);
     expect(r.final.rover.trips).toBeGreaterThanOrEqual(2);
   }, 60_000);
+  it('Day 12: Station Halcyon and the Dry Dock arrive in the second hour, and Shards stay a milestone', () => {
+    const r = runSim('engaged', 95);
+    expect(r.milestones.station!).toBeGreaterThan(50 * 60);
+    expect(r.milestones.station!).toBeLessThan(75 * 60);
+    expect(r.milestones.drydock!).toBeLessThan(90 * 60);
+    expect(r.final.ship.ownedCells.length).toBeGreaterThan(20);
+    expect(r.final.stats.geodes).toBeGreaterThan(50);
+  }, 120_000);
   it('the bot is deterministic', () => {
     expect(runSim('engaged', 5).final).toEqual(runSim('engaged', 5).final);
   });

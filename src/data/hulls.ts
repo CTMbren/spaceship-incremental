@@ -57,4 +57,48 @@ export const HULL_TUG: HullDef = {
   tileCosts,
 };
 
-export const HULLS: Record<string, HullDef> = { [HULL_TUG.id]: HULL_TUG };
+/**
+ * Day 12: Hull 2 "Hauler", 28 cells, made from the Tug at the Dry Dock (Station Halcyon). A superset of the Tug:
+ * the stern grows two rows, so every owned tile and module stays where it is.
+ *   . X X . .
+ *   . X X X .
+ *   X X X X X
+ *   X X X X X
+ *   X X X X X   <- row 4 widened
+ *   X X X X X   <- new
+ *   . X X X .   <- new
+ * Tiles 19-28 grow 8% each from tile 18's price and ask for planet goods and Circuits.
+ */
+const HAULER_MATS: Record<number, NonNullable<Cost['items']>> = {
+  19: { plate: 8, sand: 4 },
+  20: { plate: 8, sand: 4 },
+  21: { plate: 10, resin: 3 },
+  22: { plate: 10, resin: 3 },
+  23: { circuit: 2, sand: 6 },
+  24: { circuit: 2, sand: 6 },
+  25: { circuit: 3, resin: 5 },
+  26: { circuit: 3, resin: 5 },
+  27: { circuit: 4, coolant: 4 },
+  28: { circuit: 5, core_shard: 1 },
+};
+export const HAULER_GROWTH = 1.08;
+const tile18 = tileCosts[tileCosts.length - 1].credits;
+const haulerCosts: Cost[] = [...tileCosts];
+for (let n = 19; n <= 28; n++) {
+  haulerCosts.push({ credits: Math.round((tile18 * Math.pow(HAULER_GROWTH, n - 18)) / 5) * 5, items: HAULER_MATS[n] });
+}
+
+export const HULL_HAULER: HullDef = {
+  id: 'hauler',
+  name: 'Hauler',
+  template: [
+    ...HULL_TUG.template,
+    { x: 0, y: 4 }, { x: 4, y: 4 },
+    { x: 0, y: 5 }, { x: 1, y: 5 }, { x: 2, y: 5 }, { x: 3, y: 5 }, { x: 4, y: 5 },
+    { x: 1, y: 6 }, { x: 2, y: 6 }, { x: 3, y: 6 },
+  ],
+  startCells: HULL_TUG.startCells,
+  tileCosts: haulerCosts,
+};
+
+export const HULLS: Record<string, HullDef> = { [HULL_TUG.id]: HULL_TUG, [HULL_HAULER.id]: HULL_HAULER };

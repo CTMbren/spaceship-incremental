@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { buyTile, canAfford } from '../core/actions';
-import { chipText as hudChipText, costText, currentGoal, tileNeeds, type NeedRow } from '../core/goals';
+import { chipText as hudChipText, costText, currentGoal, needHint, tileNeeds, type NeedRow } from '../core/goals';
 import { cellKey, nextTileCost, parseKey, unlockableCells } from '../core/hull';
 import {
   bayRoom, beamCountdown, beamLevels, beamReady, canSend, handStats, holdCrush, nextBeamUpgrade, nextHandUpgrade, nextModuleUpgrade, nextSmasherUpgrade, nextSmelterUpgrade,
@@ -16,9 +16,11 @@ import { applyOffline, stamp, type OfflineReport } from '../core/offline';
 import { cargoRows, sellMode } from '../core/cargo';
 import { canSellBeam, moveModule, sellModule, sellRefund, smasherReady } from '../core/units';
 import { CONVERTERS, converterOf, recipeText, unitsOf } from '../core/converters';
+import { atStation, buyPack, buyPaint, convertHull, dockCheck, packCost, paintOwned, setPaint, trimColor } from '../core/station';
+import { DRY_DOCK, PAINT_IDS, PAINTS, TRADER } from '../data/station';
 import { atOrbit, buyAttachment, canLaunch, claimPing, collectHaul, launchRover, recallHaul, recallRover, toggleFit, tripSec } from '../core/rover';
 import { ATTACHMENT_IDS, ATTACHMENTS, ROVER, SITE_IDS, SITES, type AttachmentId, type SiteId } from '../data/rover';
-import { fmtNum, formatVersion } from '../core/format';
+import { fmtNum, fmtPrice, formatVersion } from '../core/format';
 import { SELLABLE, sellValue } from '../core/reserve';
 import { readyUpgrades } from '../core/upgrades';
 import { loadFromStorage, parseSave, saveToStorage, serialize } from '../core/save';
@@ -32,7 +34,7 @@ import { HAND } from '../data/hand';
 import { HELP } from '../data/help';
 import { SMASHER } from '../data/smasher';
 import { HULLS } from '../data/hulls';
-import { drawHullExterior, GOLD_TRIM, type ExteriorInfo } from './hullArt';
+import { drawHullExterior, type ExteriorInfo } from './hullArt';
 import { drawExteriorFx, type ThrustState } from './art/exterior';
 import { ART_LABEL, drawBody, drawFx, type ArtKind } from './art/modules';
 import type { Dir } from './art/kit';
@@ -102,6 +104,8 @@ const ITEM_LOOK: Record<ItemId, { name: string; color: number }> = {
   sand: { name: 'Glass Sand', color: 0xe8d4a0 },
   resin: { name: 'Amber Resin', color: 0xe08a2e },
 };
+/** Short item names for the dotted buy tiles (a tile is 56 units wide). */
+const SHORT_NAME: Partial<Record<ItemId, string>> = { core_shard: 'Shard', sand: 'Sand', resin: 'Resin' };
 const HOLD_RESET_MS = 1500;
 
 interface SheetFooter { label: string; can: boolean; fn: () => void }
@@ -270,6 +274,11 @@ export class ShipScene extends Phaser.Scene {
   private afterEvents(events: GameEvent[]): void {
     if (events.some((e) => e.kind === 'crushed' || e.kind === 'smashed' || e.kind === 'smelted' || e.kind === 'converted' || e.kind === 'arrived' || e.kind === 'job_posted' || e.kind === 'jobs_open')) this.redraw();
     if (events.some((e) => e.kind === 'jobs_open')) this.showToast('New: the Job Board. Open the Jobs tab.');
+    if (events.some((e) => e.kind === 'hull_converted')) {
+      this.persist();
+      this.resetView();
+      this.showToast('Welcome aboard the Hauler: 10 new tile spaces at the stern');
+    }
     const back = events.find((e) => e.kind === 'rover_back');
     if (back && back.kind === 'rover_back') {
       this.persist();
@@ -677,7 +686,7 @@ export class ShipScene extends Phaser.Scene {
       const a = this.artFor(m.uid);
       return `${m.uid}:${m.cell}:${a?.kind}:${a?.level}:${a?.dir}:${a?.rusty ? 1 : 0}:${power.powered.has(m.uid) ? 1 : 0}`;
     });
-    return [st.ship.ownedCells.join(';'), this.ghostCells().map(cellKey).join(';'), mods.join(';'), this.labelsOn() ? 1 : 0, rank(st) >= RANK.partner ? 1 : 0].join('|');
+    return [st.ship.ownedCells.join(';'), this.ghostCells().map(cellKey).join(';'), mods.join(';'), this.labelsOn() ? 1 : 0, trimColor(st), st.ship.hullId].join('|');
   }
 
   /** Pixel density to bake the hull at: the screen's, at the current zoom (capped for very big ships). */
@@ -702,7 +711,7 @@ export class ShipScene extends Phaser.Scene {
     const g = this.add.graphics();
     if (paint) this.layer.add(g);
     const finished = new Set(HULLS[this.state.ship.hullId].template.map((c) => `${toScreen(c).col},${toScreen(c).row}`));
-    const trim = rank(this.state) >= RANK.partner ? GOLD_TRIM : undefined;
+    const trim = trimColor(this.state); // Day 12: hull paint (Fleet Gold from the rank is one of them)
     if (paint) this.exterior = drawHullExterior(g, owned, finished, new Set(this.ghostCells().map((c) => `${toScreen(c).col},${toScreen(c).row}`)), trim);
     if (paint && this.exterior?.decal) {
       this.layer.add(this.shipTxt(this.exterior.decal.x, this.exterior.decal.y, 'LT-01', { fontFamily: FONT, fontSize: '8px', fontStyle: '600', color: '#1E2640' }).setOrigin(0.5));
@@ -837,7 +846,7 @@ export class ShipScene extends Phaser.Scene {
       this.ghostLayer.add([g, label]);
       mats.forEach(([item, n], i) => {
         const short = this.state.items[item] < n;
-        const name = item === 'core_shard' ? 'Shard' : ITEM_LOOK[item].name;
+        const name = SHORT_NAME[item] ?? ITEM_LOOK[item].name; // short names fit a tile
         this.ghostLayer.add(this.shipTxt(x + TILE / 2, y + top + 12 + i * lineH, `${n} ${name}`, {
           fontFamily: FONT, fontSize: '9px', fontStyle: '600', color: short ? T.coral : T.text,
         }).setOrigin(0.5));
@@ -1738,6 +1747,7 @@ export class ShipScene extends Phaser.Scene {
       const rows: SheetRow[] = [
         { t: 'text', text: 'Fly from field to field. While you cruise your beams pull small drifting rocks (half Ore), and the trip keeps going while you are away.' },
         this.departCard(),
+        ...(atStation(this.state) ? this.stationCards() : []),
         { t: 'heading', text: SYSTEM.name },
       ];
       ROUTE.forEach((n, i) => {
@@ -1861,6 +1871,115 @@ export class ShipScene extends Phaser.Scene {
       if (!grapple && !canSellBeam(st, uid)) rows.push({ t: 'text', text: 'Your last Tractor Beam cannot be sold.' });
       return { title: name, rows };
     });
+  }
+
+  /** Map rows while docked at a Station: the Trader and the Dry Dock. */
+  private stationCards(): SheetRow[] {
+    const st = this.state;
+    const dock = dockCheck(st);
+    return [
+      { t: 'heading', text: 'Station Halcyon' },
+      { t: 'card', title: 'Trader', sub: 'Refined and planet goods sell for 20% more here. Materials and paint for sale.', verb: 'Open', cost: '', can: true, fn: () => this.showTrader() },
+      {
+        t: 'card', title: 'Dry Dock', sub: st.ship.hullId === 'tug' ? 'Make the Tug a Hauler: 28 tiles instead of 18. Nothing moves.' : 'Your ship is a Hauler. Bigger hulls come in the next system.',
+        verb: st.ship.hullId === 'tug' ? 'Open' : 'Done', cost: '', can: st.ship.hullId === 'tug' || dock.ok, fn: () => this.showDryDock(),
+      },
+    ];
+  }
+
+  /** The Trader: sell prices here, materials in packs of 5, hull paints. */
+  private showTrader(): void {
+    this.showSheet('trader', () => {
+      const st = this.state;
+      const rows: SheetRow[] = [
+        { t: 'text', text: `While you are docked, Plate, Coolant, Circuits, Glass Sand and Amber Resin sell for 20% more (Sell button or Cargo sheet).` },
+        { t: 'heading', text: `Buy · packs of ${TRADER.pack}` },
+      ];
+      for (const [item, each] of Object.entries(TRADER.buy) as [ItemId, number][]) {
+        const cost = packCost(item)!;
+        rows.push({
+          t: 'card', title: `${TRADER.pack} ${ITEM_LOOK[item].name}`, sub: `${each} credits each. You have ${fmtNum(st.items[item])}.`,
+          verb: 'Buy', cost: costText(cost), can: atStation(st) && canAfford(st, cost) === 'ok',
+          fn: () => {
+            const r = buyPack(this.state, item);
+            if (!r.ok) { this.showToast(r.reason === 'not_docked' ? 'Only while docked' : 'Not enough credits'); return; }
+            this.apply(r.state);
+            this.refreshSheet();
+          },
+        });
+      }
+      rows.push({ t: 'heading', text: 'Hull paint' });
+      for (const id of PAINT_IDS) {
+        const p = PAINTS[id];
+        const owned = paintOwned(st, id);
+        const wearing = trimColor(st) === p.color && owned;
+        if (!owned && !p.cost) {
+          rows.push({ t: 'text', text: `${p.name}: ${p.blurb}`, color: T.dim });
+          continue;
+        }
+        rows.push({
+          t: 'card', title: `${p.name}${wearing ? ' · on' : ''}`, sub: p.blurb,
+          verb: owned ? (wearing ? 'Wearing' : 'Wear') : 'Buy', cost: owned ? '' : costText(p.cost!),
+          can: owned ? !wearing : canAfford(st, p.cost!) === 'ok',
+          fn: () => {
+            if (owned) { this.apply(setPaint(this.state, id)); this.redraw(); this.refreshSheet(); return; }
+            const r = buyPaint(this.state, id);
+            if (!r.ok) { this.showToast('Not enough materials'); return; }
+            this.apply(r.state);
+            this.redraw();
+            this.refreshSheet();
+          },
+        });
+      }
+      rows.push({ t: 'button', label: 'Back to the Map', fn: () => this.showMap() });
+      return { title: 'Trader', rows };
+    });
+  }
+
+  /** The Dry Dock: what the Hauler needs, line by line (like a hull tile), and Convert. */
+  private showDryDock(): void {
+    this.showSheet('drydock', () => {
+      const st = this.state;
+      const rows: SheetRow[] = [];
+      if (st.ship.hullId !== 'tug') {
+        rows.push({ t: 'text', text: 'Your ship is a Hauler (28 tiles). Bigger hulls come in the next system.' });
+        rows.push({ t: 'button', label: 'Back to the Map', fn: () => this.showMap() });
+        return { title: 'Dry Dock', rows };
+      }
+      rows.push({ t: 'text', text: 'The yard welds two new rows onto the stern: the Tug becomes a Hauler with room for 28 tiles. Every tile and module stays where it is; the new tiles are bought one by one, like before.' });
+      const cost = DRY_DOCK.hauler;
+      const lines: { what: 'credits' | ItemId; need: number }[] = [{ what: 'credits', need: cost.credits }, ...(Object.entries(cost.items ?? {}) as [ItemId, number][]).map(([what, need]) => ({ what, need }))];
+      for (const l of lines) {
+        const have = Math.floor(l.what === 'credits' ? st.credits : st.items[l.what]);
+        const ok = have >= l.need;
+        const name = l.what === 'credits' ? 'credits' : ITEM_LOOK[l.what].name;
+        const hint = l.what === 'credits' ? needHint(st, 'credits') : TRADER.buy[l.what] !== undefined ? `${needHint(st, l.what)}, or buy at the Trader` : needHint(st, l.what);
+        rows.push({ t: 'text', text: ok ? `✓ ${fmtNum(l.need)} ${name} (you have ${fmtNum(have)})` : `✗ ${fmtNum(l.need)} ${name}: you have ${fmtNum(have)}, need ${fmtNum(l.need - have)} more\n${hint}`, color: ok ? T.text : T.coral });
+      }
+      const chk = dockCheck(st);
+      rows.push({
+        t: 'card', title: 'Make her a Hauler', sub: chk.ok ? 'You have everything.' : chk.reason === 'not_docked' ? 'Only at Station Halcyon.' : 'Come back when every line has a tick.',
+        verb: 'Convert', cost: '', can: chk.ok,
+        fn: () => {
+          const r = convertHull(this.state);
+          if (!r.ok) return;
+          this.apply(r.state);
+          this.closeSheet();
+          this.handleEvents(r.events, W / 2, VIEW.y + 40);
+          this.afterEvents(r.events);
+        },
+      });
+      rows.push({ t: 'button', label: 'Back to the Map', fn: () => this.showMap() });
+      return { title: 'Dry Dock', rows };
+    });
+  }
+
+  /** Menu: wear the next paint you own. */
+  private cyclePaint(): void {
+    const owned = PAINT_IDS.filter((id) => paintOwned(this.state, id));
+    const cur = owned.findIndex((id) => PAINTS[id].color === trimColor(this.state));
+    this.apply(setPaint(this.state, owned[(cur + 1) % owned.length]));
+    this.redraw();
   }
 
   /** Tap the Rover Bay: grab a ping if one is showing, otherwise open the Rover sheet. */
@@ -2105,7 +2224,7 @@ export class ShipScene extends Phaser.Scene {
       for (const r of cargoRows(st)) {
         const note = !r.forSale
           ? 'Not for sale. Needed for upgrades later.'
-          : [`${r.price} credit${r.price === 1 ? '' : 's'} each`, r.keptNote, r.tip].filter(Boolean).join('. ');
+          : [`${fmtPrice(r.price)} credit${r.price === 1 ? '' : 's'} each${atStation(st) && TRADER.bonusItems.includes(r.item) ? ' (Station price, +20%)' : ''}`, r.keptNote, r.tip].filter(Boolean).join('. ');
         rows.push({
           t: 'cargo', item: r.item, count: r.count, price: r.price, note, forSale: r.forSale,
           ticked: !this.cargoOff.has(r.item), canSell: r.surplus > 0,
@@ -2175,6 +2294,11 @@ export class ShipScene extends Phaser.Scene {
           on: this.labelsOn(),
           fn: () => { this.labels = this.labelsOn() ? 'off' : 'on'; this.saveView(); this.redraw(); this.refreshSheet(); },
         },
+        ...(PAINT_IDS.filter((id) => paintOwned(this.state, id)).length > 1 ? [{
+          t: 'card' as const, title: `Hull paint · ${PAINTS[this.state.station.paint && paintOwned(this.state, this.state.station.paint) ? this.state.station.paint : trimColor(this.state) === PAINTS.gold.color ? 'gold' : 'tug'].name}`,
+          sub: 'Paints you own. More at the Trader on Station Halcyon.', verb: 'Next paint', cost: '', can: true,
+          fn: () => { this.cyclePaint(); this.refreshSheet(); },
+        }] : []),
         { t: 'button', label: 'Copy save', fn: () => this.copySave() },
         { t: 'button', label: 'Paste save', fn: () => this.pasteSave() },
         { t: 'button', label: 'Reset save', fn: () => this.showResetConfirm() },
@@ -2854,6 +2978,19 @@ export class ShipScene extends Phaser.Scene {
       g.fillStyle(0x6a55a8, 0.7).fillEllipse(px - 40, py + 90, r * 1.4, 22);
       g.fillStyle(0x2a1f48, 0.55).fillCircle(px + 60, py + 60, r * 0.8); // terminator shade
       for (let i = 0; i < 18; i++) g.fillStyle(0xe6ecff, 0.25).fillCircle(rnd.between(0, W), rnd.between(top, bottom), 1);
+    } else if (key === 'station') {
+      // Station Halcyon: a ring habitat behind the ship, with a docking spar and lit windows
+      const sx = W - 70, sy = top + 110;
+      g.lineStyle(26, 0x26304e, 1).strokeCircle(sx, sy, 120);
+      g.lineStyle(18, 0x34406a, 1).strokeCircle(sx, sy, 120);
+      for (let i = 0; i < 24; i++) {
+        const a = (i / 24) * Math.PI * 2;
+        g.fillStyle(i % 3 ? 0xffd27a : 0x8fd8ff, 0.55).fillRect(sx + Math.cos(a) * 120 - 2, sy + Math.sin(a) * 120 - 2, 4, 4);
+      }
+      for (const a of [0.3, 2.4, 4.4]) g.lineStyle(6, 0x26304e, 1).lineBetween(sx, sy, sx + Math.cos(a) * 112, sy + Math.sin(a) * 112);
+      g.fillStyle(0x3a4668, 1).fillCircle(sx, sy, 26);
+      g.fillStyle(0x2ee6d6, 0.5).fillCircle(sx, sy, 10);
+      g.fillStyle(0x26304e, 1).fillRect(sx - 140, sy + 150, 120, 10); // docking spar toward the ship
     } else if (key === 'belt' || key === 'rings') {
       if (key === 'rings') {
         g.fillStyle(0x2a2350, 1).fillCircle(W + 30, top + 40, 120);

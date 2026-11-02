@@ -1,4 +1,5 @@
 import { SMASHER } from '../data/smasher';
+import { BAL } from '../data/balance';
 import { MELTER_UNLOCK_TILES, MODULES } from '../data/modules';
 import { HULLS } from '../data/hulls';
 import { nextTileCost } from './hull';
@@ -7,6 +8,7 @@ import { sparePower } from './power';
 import { structureGoal } from './reserve';
 import { hasDeparted, hasVisited, inTransit, ROUTE } from './travel';
 import { atOrbit } from './rover';
+import { atStation } from './station';
 import { needsSmelter, smasherReady } from './units';
 import type { Cost, GameState } from './types';
 
@@ -95,6 +97,18 @@ export function currentGoal(s: GameState): Goal | null {
   if (hasVisited(s, 'rings') && !hasVisited(s, 'orbit') && moduleCount(s, 'fab') > 0 && !inTransit(s)) {
     return { id: 'to-orbit', text: `Fly on to ${ROUTE[3].name}: a planet for the Rover` };
   }
+  // Day 12: Station Halcyon, then the Dry Dock once the Tug is full
+  if (atOrbit(s) && s.rover.trips >= 1 && s.rover.status === 'home' && !hasVisited(s, 'station')) {
+    return { id: 'to-station', text: `Fly on to ${ROUTE[4].name}: the Trader and the Dry Dock` };
+  }
+  if (atStation(s) && s.station.paints.length === 0 && s.ship.hullId === 'tug' && sg?.id !== 'drydock') {
+    return { id: 'docked', text: 'Docked: open the Map for the Trader and the Dry Dock' };
+  }
+  if (sg?.id === 'drydock') {
+    return atStation(s)
+      ? { id: 'drydock', text: `Dry Dock: make the Tug a Hauler (28 tiles) · ${costText(sg.cost)}` }
+      : { id: 'drydock', text: `Fly back to ${ROUTE[4].name}: the Dry Dock makes the hull bigger` };
+  }
   const waiting = (id: 'melter' | 'fab' | 'rover') => moduleUnlocked(s, id) && moduleCount(s, id) === 0;
   if (sg?.id === 'solar' && (waiting('melter') || waiting('fab') || (waiting('rover') && s.rover.trips === 0))) {
     return { id: 'solar', text: `Add power: build a Solar Wing · ${costText(sg.cost)} · outside tile` };
@@ -131,7 +145,7 @@ export function chipText(s: GameState): string {
     return 'Hull is as big as it gets for now';
   }
   if (tile) return `Next: Expand hull · ${costText(tile)}${freeCells(s).length > 0 ? ' · Open tiles are not outside tiles' : ''}`;
-  return 'Hull complete';
+  return s.ship.hullId === 'tug' ? `Hull complete: the Dry Dock at ${ROUTE[4].name} makes it bigger` : 'Hull complete';
 }
 
 /** One line of what the next hull tile needs: amount, what you have, and where to get more. */
@@ -159,7 +173,7 @@ export function needHint(s: GameState, what: NeedRow['what']): string {
       if (s.fabs.length > 0) return 'Your Fabricator makes it from Plate and Coolant';
       if (moduleUnlocked(s, 'fab')) return 'Build a Fabricator on an Open tile: 2 Plate + 1 Coolant make 1 Circuit';
       return 'Build an Ice Melter first, then a Fabricator';
-    case 'core_shard': return 'Geodes sometimes hold one (every 12th always does); so do Rover trips to the Ruins';
+    case 'core_shard': return `Geodes sometimes hold one (the ${BAL.geode.pity}th in a row without one always does); so do Rover trips to the Ruins`;
     case 'sand': return `Rover trips to the Dunes at ${ROUTE[3].name}`;
     case 'resin': return `Rover trips to the Crater or Ruins at ${ROUTE[3].name}`;
   }

@@ -159,7 +159,7 @@ describe('travel: Engine, Depart, Void Drift, arrival', () => {
     expect(canDepart(dark)).toMatchObject({ ok: false, reason: 'unpowered' });
     const moving = depart(s).state;
     expect(canDepart(moving)).toMatchObject({ ok: false, reason: 'moving' });
-    expect(canDepart(at(s, 3))).toMatchObject({ ok: false, reason: 'locked' }); // Station Halcyon opens later (Veda Orbit opened on Day 11)
+    expect(canDepart(at(s, 4))).toMatchObject({ ok: false, reason: 'locked' }); // the Jump Point opens later (Veda Day 11, Station Day 12)
   });
   it('cruising pulls Void Drift rocks (half Ore) and arrives after the leg time; levels go faster', () => {
     const s = depart(engined()).state;

@@ -1,7 +1,8 @@
 import { HULLS } from '../data/hulls';
 import { MODULES } from '../data/modules';
+import { DRY_DOCK } from '../data/station';
 import { SMASHER } from '../data/smasher';
-import { PRICES } from '../data/balance';
+import { sellCredits } from './station';
 import { nextTileCost } from './hull';
 import { POWER } from '../data/power';
 import { freeCells, freeCellsFor, freeEdgeCells, moduleCost, moduleCount, moduleUnlocked } from './modules';
@@ -11,7 +12,7 @@ import { hasVisited } from './travel';
 import { needsSmelter, smasherReady } from './units';
 import type { Cost, GameState, ItemId, ModuleId } from './types';
 
-export type StructureGoalId = 'smelter' | 'repair' | 'solar' | 'beam2' | 'engine' | 'grapple' | 'melter' | 'fab' | 'rover' | 'expand';
+export type StructureGoalId = 'smelter' | 'repair' | 'solar' | 'beam2' | 'engine' | 'grapple' | 'melter' | 'fab' | 'rover' | 'drydock' | 'expand';
 
 /**
  * The structure purchase the player is working toward next (after the first sell). Sell and the Smelter
@@ -44,6 +45,8 @@ export function structureGoal(s: GameState): { id: StructureGoalId; cost: Cost }
   if (moduleUnlocked(s, 'melter') && moduleCount(s, 'melter') === 0 && s.stats.melted === 0) return build('melter', 'melter');
   if (moduleUnlocked(s, 'fab') && moduleCount(s, 'fab') === 0 && s.stats.fabbed === 0) return build('fab', 'fab');
   if (moduleUnlocked(s, 'rover') && moduleCount(s, 'rover') === 0 && s.rover.trips === 0) return build('rover', 'rover');
+  // Day 12: a full Tug that has reached Station Halcyon works toward the Dry Dock (the Hauler)
+  if (!expand && s.ship.hullId === 'tug' && hasVisited(s, 'station')) return { id: 'drydock', cost: DRY_DOCK.hauler };
   return expand;
 }
 
@@ -103,5 +106,5 @@ export const SELLABLE: readonly ItemId[] = ['ore', 'ice', 'plate', 'coolant', 'c
 
 /** Credits selling the given items (default: all sellable) would pay right now. */
 export function sellValue(s: GameState, items: readonly ItemId[] = SELLABLE): number {
-  return SELLABLE.reduce((sum, item) => sum + (items.includes(item) ? availableQty(s, item) * PRICES[item] : 0), 0);
+  return SELLABLE.reduce((sum, item) => sum + (items.includes(item) ? sellCredits(s, item, availableQty(s, item)) : 0), 0);
 }

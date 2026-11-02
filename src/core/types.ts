@@ -228,6 +228,8 @@ export interface GameState {
   melters: ConverterState[];
   fabs: ConverterState[];
   rover: RoverState;
+  /** Day 12: paints bought at the Trader and the one being worn (null = default). */
+  station: { paints: ('tug' | 'violet' | 'teal' | 'gold')[]; paint: 'tug' | 'violet' | 'teal' | 'gold' | null };
   /** Hand Tools level 1..4 (Workshop). */
   handLevel: number;
   stats: Stats;
@@ -263,6 +265,7 @@ export type GameEvent =
   | { kind: 'rover_back'; site: string }
   | { kind: 'rover_ping' }
   | { kind: 'rover_crate' }
+  | { kind: 'hull_converted'; hull: string }
   | { kind: 'repaired' }
   | { kind: 'smelted'; plate: number; uid?: number }
   | { kind: 'converted'; module: ConverterId; item: ItemId; qty: number; uid: number }
