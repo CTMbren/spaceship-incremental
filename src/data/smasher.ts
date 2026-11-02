@@ -13,6 +13,9 @@ export const SMASHER = {
     { hpPerSec: 3.45, queue: 3, cost: { credits: 150 } as Cost },
     { hpPerSec: 4.5, queue: 4, cost: { credits: 450 } as Cost },
     { hpPerSec: 5.7, queue: 5, cost: { credits: 1350 } as Cost },
+    // Patch 10.1
+    { hpPerSec: 7.2, queue: 6, cost: { credits: 3600 } as Cost },
+    { hpPerSec: 9, queue: 6, cost: { credits: 9000 } as Cost },
   ],
   /** Level at which a touching Beam feeds plain rocks straight into the queue. */
   autoIntakeLevel: 2,

@@ -73,6 +73,8 @@ export const ENGINE = {
     { name: 'Twin Nozzle', speed: 1.25, cost: { credits: 60 } as Cost },
     { name: 'Afterburner', speed: 1.54, cost: { credits: 180 } as Cost },
     { name: 'Fold Coil', speed: 2, cost: { credits: 540 } as Cost },
+    { name: 'Warp Spool', speed: 2.5, cost: { credits: 1620 } as Cost },
+    { name: 'Drift Drive', speed: 3, cost: { credits: 4860 } as Cost },
   ],
 } as const;
 
@@ -84,5 +86,7 @@ export const GRAPPLE = {
     { name: 'Steel Cable', cdMul: 0.85, cost: { credits: 80 } as Cost },
     { name: 'Twin Claw', cdMul: 0.72, cost: { credits: 240 } as Cost },
     { name: 'Mag Clamp', cdMul: 0.61, cost: { credits: 720 } as Cost },
+    { name: 'Grav Hook', cdMul: 0.52, cost: { credits: 2160 } as Cost },
+    { name: 'Tidal Claw', cdMul: 0.44, cost: { credits: 6480 } as Cost },
   ],
 } as const;

@@ -1,7 +1,7 @@
 import type { Cost, HullDef } from '../core/types';
 
 /**
- * Tile n (4..18) costs round5(60 * 1.23^(n-4)) credits plus materials.
+ * Tile n (4..18) costs round5(60 * 1.17^(n-4)) credits plus materials.
  * Tuned with the headless economy sim (see docs/economy-and-details.md).
  */
 const MATS: Record<number, NonNullable<Cost['items']>> = {
@@ -11,21 +11,26 @@ const MATS: Record<number, NonNullable<Cost['items']>> = {
   7: { ore: 6, plate: 2 },
   8: { ore: 8, plate: 3 },
   9: { ore: 10, plate: 4 },
-  10: { plate: 6, ice: 3 },
-  11: { plate: 8, ice: 4 },
-  12: { plate: 10, coolant: 5 },
-  13: { plate: 12, circuit: 2 },
-  14: { plate: 14, circuit: 3 },
-  15: { plate: 16, circuit: 4 },
-  16: { circuit: 5 },
-  17: { circuit: 6 },
-  18: { circuit: 8, core_shard: 1 },
+  // Patch 10.1: lighter material gates from tile 10 on (Brendan could not reach the later tiles)
+  10: { plate: 4, ice: 2 },
+  11: { plate: 5, ice: 3 },
+  12: { plate: 6, coolant: 2 },
+  13: { plate: 6, circuit: 1 },
+  14: { plate: 8, circuit: 2 },
+  15: { plate: 8, circuit: 2 },
+  16: { circuit: 3 },
+  17: { circuit: 4 },
+  18: { circuit: 5, core_shard: 1 },
 };
+
+/** Credit curve (Patch 10.1: growth x1.23 -> x1.17; tile 18 costs 540 instead of 1,090, about 3,355 in all). */
+export const TILE_BASE = 60;
+export const TILE_GROWTH = 1.17;
 
 const tileCosts: Cost[] = [];
 for (let n = 4; n <= 18; n++) {
   tileCosts.push({
-    credits: Math.round((60 * Math.pow(1.23, n - 4)) / 5) * 5,
+    credits: Math.round((TILE_BASE * Math.pow(TILE_GROWTH, n - 4)) / 5) * 5,
     items: MATS[n],
   });
 }

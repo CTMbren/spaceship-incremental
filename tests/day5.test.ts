@@ -126,11 +126,11 @@ describe('Smelter', () => {
     expect(starved.items.plate).toBe(0);
     expect(starved.smelters[0].progress).toBe(0);
   });
-  it('levels are 25% faster each and cost 40 / 120 / 360 credits', () => {
+  it('levels are 25% faster each and cost 40 / 120 / 360 / 1080 / 3240 credits', () => {
     for (let i = 1; i < SMELTER.levels.length; i++) {
       expect(SMELTER.levels[i - 1].secPerBatch / SMELTER.levels[i].secPerBatch).toBeCloseTo(1.25, 1);
     }
-    expect(SMELTER.levels.map((l) => l.cost.credits)).toEqual([0, 40, 120, 360]);
+    expect(SMELTER.levels.map((l) => l.cost.credits)).toEqual([0, 40, 120, 360, 1080, 3240]);
     let s = smelterState({ credits: 40 });
     const r = upgradeSmelter(s);
     expect(r.ok).toBe(true);
@@ -153,13 +153,13 @@ describe('Tractor Beam levels and Fire all', () => {
       const s = { ...createInitialState(), beams: [{ uid: 1, kind: 'tractor' as const, status: 'counting' as const, remaining: 0.01, level: i + 1 }] };
       return tick(s, 0.1).state.crusher.rock!.ore;
     });
-    expect(ores).toEqual([4, 5, 6, 7]);
+    expect(ores).toEqual([4, 5, 6, 7, 8, 9]);
   });
-  it('upgrade costs 25 / 75 / 225 credits and stops at level 4', () => {
+  it('upgrade costs 25 / 75 / 225 / 675 / 2025 credits and stops at level 6', () => {
     let s = createInitialState();
-    s = { ...s, credits: 1000 };
+    s = { ...s, credits: 5000 };
     const costs: number[] = [];
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 5; i++) {
       const before = s.credits;
       const r = upgradeBeam(s, 0);
       expect(r.ok).toBe(true);
@@ -167,8 +167,8 @@ describe('Tractor Beam levels and Fire all', () => {
       costs.push(before - r.state.credits);
       s = r.state;
     }
-    expect(costs).toEqual([25, 75, 225]);
-    expect(s.beams[0].level).toBe(4);
+    expect(costs).toEqual([25, 75, 225, 675, 2025]);
+    expect(s.beams[0].level).toBe(6);
     expect(upgradeBeam(s, 0)).toEqual({ ok: false, reason: 'max_level' });
     expect(upgradeBeam(s, 5)).toEqual({ ok: false, reason: 'max_level' });
   });
@@ -224,18 +224,18 @@ describe('Hand Tools', () => {
     const l4 = tapCrush(mk(4), -0.9, 0.9).state.credits - BAL.startCredits;
     expect(l4 / base).toBeCloseTo(1.25, 1);
   });
-  it('upgrades cost 40 / 120 / 360 credits and stop at level 4', () => {
-    expect(HAND.levels.map((l) => l.cost.credits)).toEqual([0, 40, 120, 360]);
+  it('upgrades cost 40 / 120 / 360 / 1080 / 3240 credits and stop at level 6', () => {
+    expect(HAND.levels.map((l) => l.cost.credits)).toEqual([0, 40, 120, 360, 1080, 3240]);
     let s = { ...createInitialState(), credits: 39 };
     expect(upgradeHand(s)).toEqual({ ok: false, reason: 'need_credits' });
-    s = { ...s, credits: 1000 };
-    for (let i = 0; i < 3; i++) {
+    s = { ...s, credits: 5000 };
+    for (let i = 0; i < 5; i++) {
       const r = upgradeHand(s);
       expect(r.ok).toBe(true);
       if (r.ok) s = r.state;
     }
-    expect(s.handLevel).toBe(4);
-    expect(s.credits).toBe(1000 - 520);
+    expect(s.handLevel).toBe(6);
+    expect(s.credits).toBe(5000 - 4840);
     expect(upgradeHand(s)).toEqual({ ok: false, reason: 'max_level' });
   });
 });
@@ -314,7 +314,7 @@ describe('upgrade-ready dot', () => {
     expect(readyUpgrades({ ...s, credits: 25 })).toBe(1); // beam 25
     expect(readyUpgrades({ ...s, credits: 40 })).toBe(2); // beam + hand
     expect(readyUpgrades({ ...s, credits: 40, items: { ...s.items, plate: 8 } })).toBe(3); // + Smasher repair
-    const maxed = { ...s, credits: 9999, handLevel: 4, beams: [{ uid: 1, kind: 'tractor' as const, status: 'idle' as const, remaining: 0, level: 4 }] };
+    const maxed = { ...s, credits: 9999, handLevel: 6, beams: [{ uid: 1, kind: 'tractor' as const, status: 'idle' as const, remaining: 0, level: 6 }] };
     expect(readyUpgrades(maxed)).toBe(0);
   });
 });

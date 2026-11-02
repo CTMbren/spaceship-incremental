@@ -28,7 +28,7 @@ describe('economy pacing (headless bot)', () => {
   });
   it('a casual player who uses the Job Board reaches Hauler in about a quarter of an hour', () => {
     const m = runSim('casual', 30).milestones;
-    expect(m.hauler!).toBeGreaterThan(8 * 60);
+    expect(m.hauler!).toBeGreaterThan(6 * 60); // Patch 10.1 cheaper tiles: the Job Board opens a little sooner
     expect(m.hauler!).toBeLessThan(25 * 60);
   });
   it('Day 10: the Ice Melter and Fabricator open the back half of the hull (no dead end at 11 or 12 tiles)', () => {

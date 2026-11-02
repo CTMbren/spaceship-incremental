@@ -53,10 +53,10 @@ describe('tile costs', () => {
       expect(HULL_TUG.tileCosts[i].credits).toBeGreaterThan(HULL_TUG.tileCosts[i - 1].credits);
     }
   });
-  it('totals about 5,610 credits (regression guard against accidental edits)', () => {
+  it('totals about 3,355 credits (Patch 10.1; regression guard against accidental edits)', () => {
     const total = HULL_TUG.tileCosts.reduce((s, c) => s + c.credits, 0);
-    expect(total).toBeGreaterThan(5500);
-    expect(total).toBeLessThan(5700);
+    expect(total).toBeGreaterThan(3300);
+    expect(total).toBeLessThan(3450);
   });
   it('returns undefined once the hull is full', () => {
     expect(nextTileCost(HULL_TUG, 18)).toBeUndefined();

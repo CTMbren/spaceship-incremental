@@ -100,13 +100,16 @@ export const MODULES = {
 /** Share of a module's price (and its upgrade credits) paid back when it is sold. */
 export const SELL_REFUND = 0.75;
 
-/** Tractor Beam levels: each level makes every rock from that beam richer. Cost base 25, x1 x3 x9. */
+/** Tractor Beam levels: each level makes every rock from that beam richer. Cost base 25, x1 x3 x9 x27 x81. */
 export const BEAM = {
   levels: [
     { name: 'Hook', oreMul: 1, cost: { credits: 0 } as Cost },
     { name: 'Winch Line', oreMul: 1.25, cost: { credits: 25 } as Cost },
     { name: 'Twin Strand', oreMul: 1.5, cost: { credits: 75 } as Cost },
     { name: 'Gravity Lace', oreMul: 1.75, cost: { credits: 225 } as Cost },
+    // Patch 10.1: two more levels everywhere (credits keep climbing about x3; late credits pile up otherwise)
+    { name: 'Quantum Tether', oreMul: 2, cost: { credits: 675 } as Cost },
+    { name: 'Singularity Lace', oreMul: 2.25, cost: { credits: 2025 } as Cost },
   ],
 } as const;
 
@@ -119,6 +122,8 @@ export const SMELTER = {
     { name: 'Draft Flue', secPerBatch: 4.8, cost: { credits: 40 } as Cost },
     { name: 'Slag Recycler', secPerBatch: 3.84, cost: { credits: 120 } as Cost },
     { name: 'Blast Chamber', secPerBatch: 3.07, cost: { credits: 360 } as Cost },
+    { name: 'Arc Furnace', secPerBatch: 2.46, cost: { credits: 1080 } as Cost },
+    { name: 'Plasma Crucible', secPerBatch: 1.97, cost: { credits: 3240 } as Cost },
   ],
 } as const;
 
@@ -135,6 +140,8 @@ export const MELTER = {
     { name: 'Steam Jacket', secPerBatch: 6.4, cost: { credits: 100 } as Cost },
     { name: 'Pressure Still', secPerBatch: 5.12, cost: { credits: 300 } as Cost },
     { name: 'Plasma Kettle', secPerBatch: 4.1, cost: { credits: 900 } as Cost },
+    { name: 'Cryo Loop', secPerBatch: 3.28, cost: { credits: 2000 } as Cost },
+    { name: 'Comet Forge', secPerBatch: 2.62, cost: { credits: 4500 } as Cost },
   ],
 } as const;
 
@@ -147,8 +154,10 @@ export const FAB = {
     { name: 'Twin Claw', secPerBatch: 16, cost: { credits: 150 } as Cost },
     { name: 'Etch Line', secPerBatch: 12.8, cost: { credits: 450 } as Cost },
     { name: 'Clean Room', secPerBatch: 10.2, cost: { credits: 1350 } as Cost },
+    { name: 'Photon Etcher', secPerBatch: 8.2, cost: { credits: 3000 } as Cost },
+    { name: 'Nano Loom', secPerBatch: 6.5, cost: { credits: 6750 } as Cost },
   ],
 } as const;
 
 /** Hull tiles the ship needs before the Ice Melter is offered (at the Rubble Belt or later). */
-export const MELTER_UNLOCK_TILES = 10;
+export const MELTER_UNLOCK_TILES = 8; // Patch 10.1: was 10, so the Melter can be tried as soon as the ship reaches the Belt

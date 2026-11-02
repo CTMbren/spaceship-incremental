@@ -110,19 +110,20 @@ describe('Smasher working', () => {
     expect(s.items.ore).toBe(5 * BAL.rock.dust.ore);
     expect(s.smashers[0].queue).toHaveLength(0);
   });
-  it('upgrades cost credits, raise the queue cap, and stop at level 4', () => {
+  it('upgrades cost credits, raise the queue cap, and stop at level 6', () => {
     let s = base();
     expect(upgradeSmasher(s)).toEqual({ ok: false, reason: 'need_credits' });
-    s = { ...s, credits: 5000 };
-    for (let lv = 2; lv <= 4; lv++) {
+    s = { ...s, credits: 20000 };
+    for (let lv = 2; lv <= 6; lv++) {
       const r = upgradeSmasher(s);
       expect(r.ok).toBe(true);
       if (r.ok) s = r.state;
       expect(s.smashers[0].level).toBe(lv);
     }
     expect(upgradeSmasher(s)).toEqual({ ok: false, reason: 'max_level' });
-    expect(s.credits).toBe(5000 - 150 - 450 - 1350);
+    expect(s.credits).toBe(20000 - 150 - 450 - 1350 - 3600 - 9000);
     expect(SMASHER.levels[3].queue).toBe(5);
+    expect(SMASHER.levels[5].queue).toBe(6);
   });
 });
 

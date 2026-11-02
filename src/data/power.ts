@@ -13,11 +13,13 @@ export const POWER = {
   boost: 1.15,
 } as const;
 
-/** Solar Wing levels. Credits buy speed: L2 adds output, L3 adds reach. Cost base 30, x1 x3. */
+/** Solar Wing levels. Credits buy speed: L2 adds output, L3 adds reach. Cost base 30, x1 x3 x9 x27. */
 export const SOLAR = {
   levels: [
     { name: 'Panel', output: 2, reach: 2, cost: { credits: 0 } as Cost },
     { name: 'Wide Wing', output: 3, reach: 2, cost: { credits: 30 } as Cost },
     { name: 'Tracker Array', output: 3, reach: 3, cost: { credits: 90 } as Cost },
+    { name: 'Mirror Array', output: 4, reach: 3, cost: { credits: 270 } as Cost },
+    { name: 'Fusion Sail', output: 5, reach: 3, cost: { credits: 810 } as Cost },
   ],
 } as const;

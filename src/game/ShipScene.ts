@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { buyTile, canAfford } from '../core/actions';
-import { chipText as hudChipText, costText, currentGoal } from '../core/goals';
+import { chipText as hudChipText, costText, currentGoal, tileNeeds, type NeedRow } from '../core/goals';
 import { cellKey, nextTileCost, parseKey, unlockableCells } from '../core/hull';
 import {
   bayRoom, beamCountdown, beamLevels, beamReady, canSend, handStats, holdCrush, nextBeamUpgrade, nextHandUpgrade, nextModuleUpgrade, nextSmasherUpgrade, nextSmelterUpgrade,
@@ -382,6 +382,7 @@ export class ShipScene extends Phaser.Scene {
       this.focusCell(cell);
       return;
     }
+    if (res.reason === 'need_credits' || res.reason === 'need_items') { this.showTileSheet(cell); return; }
     const msg: Record<string, string> = {
       need_credits: 'Not enough credits',
       need_items: 'Not enough materials',
@@ -390,6 +391,33 @@ export class ShipScene extends Phaser.Scene {
       unknown_hull: 'Unknown hull',
     };
     this.showToast(msg[res.reason]);
+  }
+
+  /** Tap a buy tile you cannot afford yet: every requirement, what you have, and where to get the rest. */
+  private showTileSheet(cell: Cell): void {
+    this.showSheet('tile', () => {
+      const st = this.state;
+      const needs = tileNeeds(st);
+      if (!needs) { this.closeSheet(); return { title: 'Hull complete', rows: [] }; }
+      const name = (w: NeedRow['what']) => (w === 'credits' ? 'credits' : w === 'core_shard' ? 'Core Shard' : ITEM_LOOK[w].name);
+      const rows: SheetRow[] = [{ t: 'text', text: 'A bigger hull means more Open tiles for modules. This tile needs:' }];
+      for (const r of needs.rows) {
+        const ok = r.have >= r.need;
+        rows.push({
+          t: 'text',
+          text: ok ? `✓ ${fmtNum(r.need)} ${name(r.what)} (you have ${fmtNum(r.have)})` : `✗ ${fmtNum(r.need)} ${name(r.what)}: you have ${fmtNum(r.have)}, need ${fmtNum(r.need - r.have)} more\n${r.hint}`,
+          color: ok ? T.text : T.coral,
+        });
+      }
+      const all = needs.rows.every((r) => r.have >= r.need);
+      if (needs.rows.some((r) => r.what !== 'credits' && r.have < r.need) && st.flags.holdForGoal) rows.push({ t: 'text', text: 'Sell and the converters keep back what this tile needs while "Hold materials for my goal" is on (Cargo sheet).' });
+      rows.push({
+        t: 'card', title: `Hull tile ${needs.number}`, sub: all ? 'You have everything.' : 'Come back when every line has a tick.',
+        verb: 'Buy', cost: '', can: all,
+        fn: () => { this.closeSheet(); this.tryBuy(cell); },
+      });
+      return { title: `Hull tile ${needs.number}`, rows };
+    });
   }
 
   // ---- drawing -----------------------------------------------------------
@@ -773,17 +801,29 @@ export class ShipScene extends Phaser.Scene {
     const cost = nextTileCost(def, this.state.ship.ownedCells.length);
     if (!cost) return;
     const ok = canAfford(this.state, cost) === 'ok';
+    // Patch 10.1: the materials show under the credits, coral when you are short
+    const mats = Object.entries(cost.items ?? {}).filter(([, v]) => (v ?? 0) > 0) as [ItemId, number][];
+    const lineH = 10;
+    const top = TILE / 2 - (mats.length * lineH) / 2;
     for (const c of this.ghostCells()) {
       const { x, y } = this.px(c);
       const g = this.add.graphics();
       this.dashedRect(g, x + 3, y + 3, TILE - 6, TILE - 6, ok ? C.crit : C.ghost);
+      const creditsOk = this.state.credits >= cost.credits;
       const label = this
-        .shipTxt(x + TILE / 2, y + TILE / 2, String(cost.credits), {
-          fontFamily: FONT, fontSize: '15px', fontStyle: '600', color: ok ? T.gold : T.dim,
+        .shipTxt(x + TILE / 2, y + top, fmtNum(cost.credits), {
+          fontFamily: FONT, fontSize: mats.length ? '13px' : '15px', fontStyle: '600', color: ok ? T.gold : creditsOk ? T.text : T.dim,
         })
         .setOrigin(0.5);
-      this.tileActions.set(cellKey(c), () => this.tryBuy(c));
       this.ghostLayer.add([g, label]);
+      mats.forEach(([item, n], i) => {
+        const short = this.state.items[item] < n;
+        const name = item === 'core_shard' ? 'Shard' : ITEM_LOOK[item].name;
+        this.ghostLayer.add(this.shipTxt(x + TILE / 2, y + top + 12 + i * lineH, `${n} ${name}`, {
+          fontFamily: FONT, fontSize: '9px', fontStyle: '600', color: short ? T.coral : T.text,
+        }).setOrigin(0.5));
+      });
+      this.tileActions.set(cellKey(c), () => this.tryBuy(c));
     }
   }
 

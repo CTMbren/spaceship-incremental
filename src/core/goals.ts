@@ -122,3 +122,45 @@ export function chipText(s: GameState): string {
   if (tile) return `Next: Expand hull · ${costText(tile)}${freeCells(s).length > 0 ? ' · Open tiles are not outside tiles' : ''}`;
   return 'Hull complete';
 }
+
+/** One line of what the next hull tile needs: amount, what you have, and where to get more. */
+export interface NeedRow {
+  what: 'credits' | keyof GameState['items'];
+  need: number;
+  have: number;
+  /** Where to get it (plain words), shown when short. */
+  hint: string;
+}
+
+/** Where each thing comes from, given how far the player has got. */
+export function needHint(s: GameState, what: NeedRow['what']): string {
+  switch (what) {
+    case 'credits': return 'Sell materials, or finish jobs on the Job Board';
+    case 'ore': return 'Crack rocks, or let a Smasher do it';
+    case 'plate': return s.smelters.length > 0 ? 'Your Smelter makes it from Ore' : 'Build a Smelter: 3 Ore make 1 Plate';
+    case 'ice': return hasVisited(s, 'belt') ? 'Ice chunks and Heavy rocks (Grapple Beam) out here' : `Fly to the ${ROUTE[1].name} (Map tab)`;
+    case 'coolant':
+      if (s.melters.length > 0) return 'Your Ice Melter makes it from Ice';
+      if (moduleUnlocked(s, 'melter')) return 'Build an Ice Melter on an Open tile: 2 Ice make 1 Coolant';
+      if (!hasVisited(s, 'belt')) return `Ice Melter: offered at the ${ROUTE[1].name}`;
+      return `Ice Melter: offered once the hull has ${MELTER_UNLOCK_TILES} tiles`;
+    case 'circuit':
+      if (s.fabs.length > 0) return 'Your Fabricator makes it from Plate and Coolant';
+      if (moduleUnlocked(s, 'fab')) return 'Build a Fabricator on an Open tile: 2 Plate + 1 Coolant make 1 Circuit';
+      return 'Build an Ice Melter first, then a Fabricator';
+    case 'core_shard': return 'Geodes sometimes hold one (every 12th always does)';
+  }
+}
+
+/** Everything the next hull tile needs, line by line, or null when the hull is complete. Pure. */
+export function tileNeeds(s: GameState): { number: number; rows: NeedRow[] } | null {
+  const tile = nextTileCost(HULLS[s.ship.hullId], s.ship.ownedCells.length);
+  if (!tile) return null;
+  const rows: NeedRow[] = [];
+  if (tile.credits > 0) rows.push({ what: 'credits', need: tile.credits, have: Math.floor(s.credits), hint: needHint(s, 'credits') });
+  for (const [k, v] of Object.entries(tile.items ?? {})) {
+    const item = k as keyof GameState['items'];
+    rows.push({ what: item, need: v ?? 0, have: Math.floor(s.items[item]), hint: needHint(s, item) });
+  }
+  return { number: s.ship.ownedCells.length + 1, rows };
+}

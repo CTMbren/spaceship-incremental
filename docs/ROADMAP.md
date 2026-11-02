@@ -83,11 +83,17 @@ Bot pacing after Day 10 (m:ss reached; 100 min run):
 
 The full hull lands at 52-61 minutes for active players, on the design target (50-60).
 
+- Patch 10.1 (v0.10.1; no save change): Brendan could not reach the later hull tiles.
+  - **Cheaper hull tiles**: the credit curve grows x1.17 per tile instead of x1.23 (tile 18 is 540 credits instead of 1,090; all 15 tiles about 3,355 instead of 5,610). Lighter material gates from tile 10: 4 Plate + 2 Ice, 5 + 3 Ice, 6 Plate + 2 Coolant, then 1 / 2 / 2 Circuits with 6-8 Plate, then 3 / 4 / 5 Circuits (+1 Core Shard on tile 18). The Ice Melter is offered at the Belt from 8 tiles (was 10).
+  - **See what a tile needs**: dotted buy tiles show the credits and up to two materials underneath, coral when you are short. Tapping one you cannot afford opens a "Hull tile N" sheet: every requirement with what you have, how many more, and where to get it ("Fly to the Rubble Belt", "Build an Ice Melter on an Open tile", "Your Fabricator makes it"). Logic in `tileNeeds` / `needHint` (`src/core/goals.ts`, tested).
+  - **Two more upgrade levels for every module** (levels 5 and 6; the Solar Wing gets 4 and 5): Tractor Beam Quantum Tether / Singularity Lace (+25% Ore each, 675 / 2,025), Smelter Arc Furnace / Plasma Crucible (1,080 / 3,240), Ice Melter Cryo Loop / Comet Forge (2,000 / 4,500), Fabricator Photon Etcher / Nano Loom (3,000 / 6,750), Smasher L5 / L6 (7.2 and 9 HP/s, queue 6; 3,600 / 9,000), Hand Tools Shock Gauntlet / Cryo Grip (1,080 / 3,240), Engine Warp Spool / Drift Drive (1,620 / 4,860), Grapple Grav Hook / Tidal Claw (2,160 / 6,480), Solar Mirror Array / Fusion Sail (4 and 5 power, 270 / 810). New frame materials: platinum (L5) and beam-teal (L6). The Auto-Winch still has no levels.
+  - Bot pacing (90 min): full hull at 44:09 engaged (was 52:30), 54:53 casual (was 60:36); credits left at 90 min fall from about 25k to 1-3k because the new levels soak them up. 214 tests.
+
 ## Next
 0. **Day 10 playtest** on the iPhone: fly to the Belt, grow to 10 tiles, build the Ice Melter and Fabricator, finish the hull; hold a beam tile to Move or Sell it; check the HUD pills fit. Day 9 and graphics items still open: job sizes and Hand over, swipe / pinch, fps on a full ship with `?debug`.
 1. Day 11: **Veda Orbit + Rover**. Then Station Halcyon (Trader, Dry Dock) and the Jump.
 2. Small fixes waiting: Auto-sell with keep floors; 2-tile footprints (Engine 2x1, Grapple 1x2, Fabricator 2x2).
-3. Watch: engaged players' Rep pace; credits pile up late (~25k by minute 60 now); **Core Shards pile up** (the engaged bot holds about 14 by minute 60; the design wants about 3 an hour; the guaranteed-shard pity and 4% chance on 1.5x Ring Fields geodes are the knobs, and they matter once the Jump spends Shards).
+3. Watch: engaged players' Rep pace; credits no longer pile up (levels 5-6 soak them up; watch that upgrades do not starve tile buying); **Core Shards pile up** (the engaged bot holds about 14 by minute 60; the design wants about 3 an hour; the guaranteed-shard pity and 4% chance on 1.5x Ring Fields geodes are the knobs, and they matter once the Jump spends Shards).
 
 ## Planned: Milestone 2 (planning only, see `docs/travel-shop-rover-jump-plan.md`)
 Travel along a system route (Engine, nodes, offline travel), Rover expeditions at planets, three shops (Workshop, Station Trader, Flux Exchange), Jump as shockwave damage with Braces instead of a reset, more modules. Proposed order: Days 8 to 12 after the Day 7 core-loop and layout playtest gate. Open decisions for Brendan are in section 9 of that doc.

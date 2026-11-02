@@ -253,7 +253,7 @@ describe('zones: Ice, Heavy rocks and the Grapple Beam', () => {
     expect(out.state.items.ice).toBe(2);
     expect(out.events).toContainEqual(expect.objectContaining({ kind: 'crushed', ice: 2 }));
     // a 9-tile ship can buy tile 10 with Ice
-    const nine = { ...out.state, ship: { ...out.state.ship, ownedCells: ['2,0', '2,1', '2,2', '1,0', '1,1', '1,2', '3,1', '3,2', '2,3'] }, items: { ...out.state.items, plate: 6, ice: 3 }, credits: 1000 };
+    const nine = { ...out.state, ship: { ...out.state.ship, ownedCells: ['2,0', '2,1', '2,2', '1,0', '1,1', '1,2', '3,1', '3,2', '2,3'] }, items: { ...out.state.items, plate: 4, ice: 2 }, credits: 1000 };
     const r = buyTile(nine, { x: 1, y: 3 });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.state.items.ice).toBe(0);

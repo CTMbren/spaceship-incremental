@@ -132,8 +132,8 @@ describe('Ice Melter and Fabricator: batches', () => {
 });
 
 describe('unlocks, goals and placement', () => {
-  it('the Ice Melter is offered at the Rubble Belt with 10 hull tiles, the Fabricator once a Melter exists', () => {
-    expect(moduleUnlocked(belt(9), 'melter')).toBe(false);
+  it('the Ice Melter is offered at the Rubble Belt with 8 hull tiles, the Fabricator once a Melter exists', () => {
+    expect(moduleUnlocked(belt(MELTER_UNLOCK_TILES - 1), 'melter')).toBe(false);
     expect(moduleUnlocked({ ...belt(), travel: { node: 0, dest: null, progress: 0, visited: [0] } }, 'melter')).toBe(false);
     expect(moduleUnlocked(belt(), 'melter')).toBe(true);
     expect(moduleUnlocked(belt(), 'fab')).toBe(false);
@@ -193,32 +193,32 @@ describe('reserves: converters never eat the goal, Sell keeps their feed', () =>
       melters: [{ uid: 30, paid: { credits: 0 }, level: 1, on: false, progress: 0 }],
       fabs: [{ uid: 0, paid: { credits: 0 }, level: 1, on: true, progress: 0 }],
       stats: { ...s.stats, melted: 5, fabbed: 1 },
-      items: { ...s.items, plate: 12, coolant: 3, circuit: 0 },
+      items: { ...s.items, plate: 6, coolant: 3, circuit: 0 },
     };
     expect(structureGoal(s)?.id).toBe('expand');
-    expect(reserved(s)).toEqual({ plate: 12, circuit: 2 });
+    expect(reserved(s)).toEqual({ plate: 6, circuit: 1 });
     // Plate is all reserved: the Fabricator cannot run
     expect(run(s, 25).items.circuit).toBe(0);
-    // with spare Plate it runs, and Sell keeps back the Plate and Coolant for the 2 Circuits
+    // with spare Plate it runs, and Sell keeps back the Plate and Coolant for the missing Circuit
     s = { ...s, items: { ...s.items, plate: 30 } };
-    expect(feedReserves(s)).toMatchObject({ plate: 4, coolant: 2 });
-    expect(availableQty(s, 'plate')).toBe(30 - 12 - 4);
-    expect(availableQty(s, 'coolant')).toBe(1);
+    expect(feedReserves(s)).toMatchObject({ plate: 2, coolant: 1 });
+    expect(availableQty(s, 'plate')).toBe(30 - 6 - 2);
+    expect(availableQty(s, 'coolant')).toBe(2);
     expect(run(s, 21).items.circuit).toBe(1);
   });
   it('the Melter feed: Sell keeps the Ice to make the Coolant the goal is short of', () => {
-    let s = powered(belt(11)); // tile 12 needs 10 Plate + 5 Coolant
+    let s = powered(belt(11)); // tile 12 needs 6 Plate + 2 Coolant
     s = {
       ...s,
       ship: { ...s.ship, modules: [...s.ship.modules, { uid: 30, defId: 'melter', cell: 'm30' }, { uid: 31, defId: 'fab', cell: 'f31' }] },
       melters: [{ uid: 30, paid: { credits: 0 }, level: 1, on: true, progress: 0 }],
       fabs: [{ uid: 31, paid: { credits: 0 }, level: 1, on: false, progress: 0 }],
       stats: { ...s.stats, melted: 1, fabbed: 1 },
-      items: { ...s.items, coolant: 2, ice: 20 },
+      items: { ...s.items, coolant: 0, ice: 20 },
     };
     expect(structureGoal(s)?.id).toBe('expand');
-    expect(feedReserves(s).ice).toBe(6); // 3 Coolant short x 2 Ice
-    expect(availableQty(s, 'ice')).toBe(14);
+    expect(feedReserves(s).ice).toBe(4); // 2 Coolant short x 2 Ice
+    expect(availableQty(s, 'ice')).toBe(16);
   });
 });
 
@@ -288,5 +288,38 @@ describe('jobs and saves', () => {
     expect(r.state.melters).toEqual([]);
     expect(r.state.fabs).toEqual([]);
     expect(r.state.stats.melted).toBe(0);
+  });
+});
+
+describe('Patch 10.1: easier hull tiles and clear requirements', () => {
+  it('tileNeeds lists every requirement with what you have and where to get more', async () => {
+    const { tileNeeds } = await import('../src/core/goals');
+    const s = { ...belt(11), credits: 100, items: { ...belt(11).items, plate: 3, coolant: 0 } };
+    const n = tileNeeds(s)!;
+    expect(n.number).toBe(12);
+    expect(n.rows.map((r) => [r.what, r.need, r.have])).toEqual([['credits', HULL_TUG.tileCosts[8].credits, 100], ['plate', 6, 3], ['coolant', 2, 0]]);
+    expect(n.rows[2].hint).toContain('Build an Ice Melter');
+    const withMelter = { ...s, melters: [{ uid: 30, paid: { credits: 0 }, level: 1, on: true, progress: 0 }] };
+    expect(tileNeeds(withMelter)!.rows[2].hint).toContain('Your Ice Melter');
+    const atStart = { ...createInitialState(), ship: { ...createInitialState().ship, ownedCells: hullOf(9) } };
+    expect(tileNeeds(atStart)!.rows.find((r) => r.what === 'ice')!.hint).toContain('Fly to the Rubble Belt');
+    expect(tileNeeds({ ...s, ship: { ...s.ship, ownedCells: hullOf(18) } })).toBeNull();
+  });
+  it('every module has 6 levels, each dearer than the last', async () => {
+    const tables = [
+      (await import('../src/data/modules')).BEAM.levels, (await import('../src/data/modules')).SMELTER.levels,
+      MELTER.levels, FAB.levels, (await import('../src/data/smasher')).SMASHER.levels,
+      (await import('../src/data/hand')).HAND.levels, (await import('../src/data/travel')).ENGINE.levels,
+      (await import('../src/data/travel')).GRAPPLE.levels,
+    ];
+    for (const t of tables) {
+      expect(t).toHaveLength(6);
+      for (let i = 2; i < t.length; i++) expect(t[i].cost.credits).toBeGreaterThan(t[i - 1].cost.credits);
+    }
+    expect((await import('../src/data/power')).SOLAR.levels).toHaveLength(5);
+  });
+  it('the Ice Melter now opens at 8 tiles', () => {
+    expect(MELTER_UNLOCK_TILES).toBe(8);
+    expect(moduleUnlocked(belt(8), 'melter')).toBe(true);
   });
 });

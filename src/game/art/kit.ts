@@ -15,8 +15,8 @@ export const S = 56;
 /** Ink: the outline colour used everywhere. */
 export const INK = C.hullOutline;
 
-/** Frame material by level 1..4: bronze, steel, brass, gold (the tier is readable by brightness too). */
-export const TIER = [0xb07a45, 0x9aa8bf, 0xd8b25a, 0xffc83d] as const;
+/** Frame material by level 1..6: bronze, steel, brass, gold, platinum, beam-teal (the tier is readable by brightness too). */
+export const TIER = [0xb07a45, 0x9aa8bf, 0xd8b25a, 0xffc83d, 0xe6ecff, 0x2ee6d6] as const;
 
 export const DIR_V: Record<Dir, Pt> = { left: { x: -1, y: 0 }, right: { x: 1, y: 0 }, up: { x: 0, y: -1 }, down: { x: 0, y: 1 } };
 
