@@ -1,6 +1,7 @@
 import { POWER } from '../data/power';
 import { ENGINE, SYSTEM, VOID_DRIFT, type RouteNode, type Zone } from '../data/travel';
 import { evaluatePower, type PowerInfo } from './power';
+import { collectHaul } from './rover';
 import type { GameEvent, GameState, ModuleInstance } from './types';
 
 export const ROUTE: readonly RouteNode[] = SYSTEM.nodes;
@@ -44,13 +45,14 @@ export function nextLegSec(s: GameState, power?: PowerInfo): number | null {
 
 export type DepartCheck =
   | { ok: true }
-  | { ok: false; reason: 'moving' | 'end' | 'locked' | 'no_engine' | 'unpowered'; label: string };
+  | { ok: false; reason: 'moving' | 'end' | 'locked' | 'no_engine' | 'unpowered' | 'rover'; label: string };
 
 export function canDepart(s: GameState): DepartCheck {
   if (inTransit(s)) return { ok: false, reason: 'moving', label: 'Already under way' };
   const next = ROUTE[s.travel.node + 1];
   if (!next) return { ok: false, reason: 'end', label: 'End of the route' };
   if (!next.open) return { ok: false, reason: 'locked', label: 'Opens in a later update' };
+  if (s.rover.status === 'out') return { ok: false, reason: 'rover', label: 'Recall the Rover first' };
   const e = engineModule(s);
   if (!e) return { ok: false, reason: 'no_engine', label: 'Build an Engine first' };
   if (!evaluatePower(s).powered.has(e.uid)) return { ok: false, reason: 'unpowered', label: 'The Engine has no power' };
@@ -60,7 +62,8 @@ export function canDepart(s: GameState): DepartCheck {
 /** Leave for the next node on the route. Beams keep working (on Void Drift rocks) while cruising. */
 export function depart(state: GameState): { state: GameState; events: GameEvent[] } {
   if (!canDepart(state).ok) return { state, events: [] };
-  const s = structuredClone(state);
+  // a Rover haul still waiting in the Bay comes aboard as the ship leaves
+  const s = structuredClone(state.rover.status === 'back' ? collectHaul(state).state : state);
   s.travel.dest = s.travel.node + 1;
   s.travel.progress = 0;
   return { state: s, events: [{ kind: 'departed', to: s.travel.dest }] };

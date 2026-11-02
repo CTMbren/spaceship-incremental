@@ -44,9 +44,9 @@ export const SYSTEM = {
       blurb: 'Richer rocks (+25% Ore) and more geodes.',
     },
     {
-      id: 'orbit', name: 'Veda Orbit', type: 'orbit', legSec: 8 * 60, open: false,
-      tractor: [{ kind: 'dust', w: 1 }], grapple: 'heavy', oreMul: 1, geodeMul: 1,
-      blurb: 'A planet. Rover trips open here in a later update.',
+      id: 'orbit', name: 'Veda Orbit', type: 'orbit', legSec: 8 * 60, open: true,
+      tractor: [{ kind: 'dust', w: 0.7 }, { kind: 'ice', w: 0.3 }], grapple: 'heavy', oreMul: 1.1, geodeMul: 1,
+      blurb: 'The planet Veda. Build a Rover Bay and send the Rover down for Glass Sand, Amber Resin and Relics.',
     },
     {
       id: 'station', name: 'Station Halcyon', type: 'station', legSec: 8 * 60, open: false,

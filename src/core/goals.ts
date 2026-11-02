@@ -6,6 +6,7 @@ import { freeCells, freeEdgeCells, moduleCost, moduleCount, moduleUnlocked } fro
 import { sparePower } from './power';
 import { structureGoal } from './reserve';
 import { hasDeparted, hasVisited, inTransit, ROUTE } from './travel';
+import { atOrbit } from './rover';
 import { needsSmelter, smasherReady } from './units';
 import type { Cost, GameState } from './types';
 
@@ -85,7 +86,17 @@ export function currentGoal(s: GameState): Goal | null {
     if (freeCells(s).length === 0) return { id: 'make-room', text: `Make room for ${name}: tap a module and Sell or Move it` };
     return { id: sg.id, text: `Build ${name} · ${costText(sg.cost)}` };
   }
-  if (sg?.id === 'solar' && (moduleUnlocked(s, 'melter') && moduleCount(s, 'melter') === 0 || moduleUnlocked(s, 'fab') && moduleCount(s, 'fab') === 0)) {
+  // Day 11: at Veda Orbit, the Rover Bay and the first trip
+  if (sg?.id === 'rover') return { id: 'rover', text: `Build a Rover Bay · ${costText(sg.cost)} · outside tile` };
+  if (moduleCount(s, 'rover') > 0 && s.rover.trips === 0 && s.rover.status === 'home' && atOrbit(s)) {
+    return { id: 'rover-go', text: 'Send the Rover down: tap the Rover Bay' };
+  }
+  if (s.rover.status === 'back' && s.rover.trips === 1) return { id: 'rover-collect', text: 'The Rover is back: tap the Rover Bay to collect' };
+  if (hasVisited(s, 'rings') && !hasVisited(s, 'orbit') && moduleCount(s, 'fab') > 0 && !inTransit(s)) {
+    return { id: 'to-orbit', text: `Fly on to ${ROUTE[3].name}: a planet for the Rover` };
+  }
+  const waiting = (id: 'melter' | 'fab' | 'rover') => moduleUnlocked(s, id) && moduleCount(s, id) === 0;
+  if (sg?.id === 'solar' && (waiting('melter') || waiting('fab') || (waiting('rover') && s.rover.trips === 0))) {
     return { id: 'solar', text: `Add power: build a Solar Wing · ${costText(sg.cost)} · outside tile` };
   }
   return null;
@@ -148,7 +159,9 @@ export function needHint(s: GameState, what: NeedRow['what']): string {
       if (s.fabs.length > 0) return 'Your Fabricator makes it from Plate and Coolant';
       if (moduleUnlocked(s, 'fab')) return 'Build a Fabricator on an Open tile: 2 Plate + 1 Coolant make 1 Circuit';
       return 'Build an Ice Melter first, then a Fabricator';
-    case 'core_shard': return 'Geodes sometimes hold one (every 12th always does)';
+    case 'core_shard': return 'Geodes sometimes hold one (every 12th always does); so do Rover trips to the Ruins';
+    case 'sand': return `Rover trips to the Dunes at ${ROUTE[3].name}`;
+    case 'resin': return `Rover trips to the Crater or Ruins at ${ROUTE[3].name}`;
   }
 }
 

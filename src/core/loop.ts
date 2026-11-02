@@ -11,6 +11,7 @@ import { availableQty, SELLABLE, smeltableQty } from './reserve';
 import { nextRandom } from './rng';
 import { travelStep, zoneOf } from './travel';
 import { CONVERTER_IDS, CONVERTERS, unitsOf } from './converters';
+import { roverStep } from './rover';
 import { roomiestSmasher, smasherCap, smasherReady } from './units';
 import type { BeamState, ConverterId, GameEvent, GameState, ItemId, Rock, RockKind } from './types';
 
@@ -126,6 +127,8 @@ export interface TickOptions {
   smelt?: boolean;
   /** False keeps the Job Board's production-rate average still (offline output is not the player's pace). */
   trackRate?: boolean;
+  /** False hides Rover pings (offline: nobody is there to tap them). Default true. */
+  pings?: boolean;
 }
 
 /** Advance the world by dt seconds. Pure; returns a new state. */
@@ -253,6 +256,9 @@ export function tick(state: GameState, dt: number, forceGeode?: boolean, opts: T
 
   // Travel: the Engine moves the ship along the route (offline it runs at full speed: travelMul).
   travelStep(s, dt * (opts.travelMul ?? 1), power, events);
+
+  // Rover: the trip runs at full speed like travel (one trip at most while away: it waits to be collected).
+  roverStep(s, dt * (opts.travelMul ?? 1), events, opts.pings !== false);
 
   // Auto-Winch: every idle, powered beam touching a powered winch fires as soon as the Bay has room.
   autoWinch(s, power);

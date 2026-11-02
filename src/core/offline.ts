@@ -27,6 +27,8 @@ export interface OfflineReport {
   arrived: string[];
   /** Still cruising: seconds of real time left to the next node (null when parked or stalled). */
   stillCruising: boolean;
+  /** The Rover came back from this site while you were away (its haul waits in the Bay), or null. */
+  roverBack: string | null;
 }
 
 /** A stretch of time away with one production rate (and whether Smelters still run). */
@@ -79,12 +81,13 @@ export const stamp = (s: GameState, nowMs: number): GameState => ({ ...s, savedA
  * full speed (one real second of cruising per real second away). No geodes arrive (they need hands). Nothing is
  * sold. With a Rusty Smasher the ship only smelts what it already holds.
  */
-function fastForward(start: GameState, segs: Segment[]): { state: GameState; arrived: number[] } {
+function fastForward(start: GameState, segs: Segment[]): { state: GameState; arrived: number[]; roverBack: string | null } {
   let s = start;
   const arrived: number[] = [];
+  let roverBack: string | null = null;
   for (const seg of segs) {
     const effective = seg.realSec * seg.rate;
-    const opts = { travelMul: 1 / seg.rate, smelt: seg.smelt, trackRate: false };
+    const opts = { travelMul: 1 / seg.rate, smelt: seg.smelt, trackRate: false, pings: false };
     const steps = Math.floor(effective / OFFLINE.stepSec);
     const rest = effective - steps * OFFLINE.stepSec;
     for (let i = 0; i <= steps; i++) {
@@ -96,10 +99,13 @@ function fastForward(start: GameState, segs: Segment[]): { state: GameState; arr
       }
       const out = tick(s, dt, false, opts);
       s = out.state;
-      for (const e of out.events) if (e.kind === 'arrived') arrived.push(e.node);
+      for (const e of out.events) {
+        if (e.kind === 'arrived') arrived.push(e.node);
+        if (e.kind === 'rover_back') roverBack = e.site;
+      }
     }
   }
-  return { state: s, arrived };
+  return { state: s, arrived, roverBack };
 }
 
 /**
@@ -134,6 +140,7 @@ export function applyOffline(state: GameState, nowMs: number): { state: GameStat
       smeltersCooled: counted > OFFLINE.smelterSec && [...state.smelters, ...state.melters, ...state.fabs].some((m) => m.on),
       arrived: ff.arrived.map((n) => ROUTE[n].name),
       stillCruising: after.travel.dest !== null,
+      roverBack: ff.roverBack,
     },
   };
 }

@@ -40,6 +40,12 @@ describe('economy pacing (headless bot)', () => {
     expect(m.tiles[13]).toBeDefined();
     expect(m.tiles[15]).toBeDefined();
   }, 60_000);
+  it('Day 11: an engaged player reaches Veda Orbit and sends the Rover down within the hour', () => {
+    const r = runSim('engaged', 60);
+    expect(r.milestones.orbit!).toBeLessThan(40 * 60);
+    expect(r.milestones.roverBay!).toBeLessThan(50 * 60);
+    expect(r.final.rover.trips).toBeGreaterThanOrEqual(2);
+  }, 60_000);
   it('the bot is deterministic', () => {
     expect(runSim('engaged', 5).final).toEqual(runSim('engaged', 5).final);
   });

@@ -22,6 +22,7 @@ const GOAL_LABEL: Record<StructureGoalId, string> = {
   grapple: 'the Grapple Beam',
   melter: 'the Ice Melter',
   fab: 'the Fabricator',
+  rover: 'the Rover Bay',
   expand: 'the next hull tile',
 };
 

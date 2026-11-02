@@ -49,5 +49,5 @@ export const BAL = {
 } as const;
 
 export const PRICES: Record<ItemId, number> = {
-  ore: 1, ice: 3, plate: 8, coolant: 16, circuit: 60, core_shard: 150,
+  ore: 1, ice: 3, plate: 8, coolant: 16, circuit: 60, core_shard: 150, sand: 5, resin: 12,
 };

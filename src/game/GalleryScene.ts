@@ -12,7 +12,7 @@ import { DPR, H, W } from './ShipScene';
  * Art gallery (`?gallery`): every module in every state and level, and the hull exterior with its thrusters,
  * at the zoom levels the game uses. For reviewing the look on a phone without playing through.
  */
-interface Cellspec { kind: ArtKind; title: string; level: number; working: boolean; powered: boolean; boosted: boolean; rusty?: boolean; cruising?: boolean; period: number; flashEvery?: number }
+interface Cellspec { kind: ArtKind; title: string; level: number; working: boolean; powered: boolean; boosted: boolean; rusty?: boolean; cruising?: boolean; period: number; flashEvery?: number; rover?: 'home' | 'out' | 'back' }
 
 const COLS: { title: string; spec: (k: ArtKind) => Partial<Cellspec> }[] = [
   { title: 'Idle L1', spec: () => ({ level: 1, working: false, powered: true, boosted: false }) },
@@ -27,6 +27,7 @@ const ROWS: { kind: ArtKind; name: string; period: number; extra?: Partial<Cells
   { kind: 'smelter', name: 'Smelter', period: 3 },
   { kind: 'melter', name: 'Ice Melter', period: 4 },
   { kind: 'fab', name: 'Fabricator', period: 5 },
+  { kind: 'rover', name: 'Rover Bay', period: 6, extra: { rover: 'back', working: false, level: 2 }, extraTitle: 'Rover back' },
   { kind: 'solar', name: 'Solar Wing', period: 3 },
   { kind: 'engine', name: 'Engine', period: 3, extra: { cruising: true, working: true, level: 2 }, extraTitle: 'Cruising' },
   { kind: 'winch', name: 'Auto-Winch', period: 3 },
@@ -145,6 +146,7 @@ export class GalleryScene extends Phaser.Scene {
         t, dir: c.dir, level: sp.level, working: sp.working, progress: p, powered: sp.powered, boosted: sp.boosted,
         flash: sp.kind === 'beam' || sp.kind === 'grapple' || sp.kind === 'smelter' || sp.kind === 'melter' || sp.kind === 'fab' ? flash : 0, calm: false, rusty: sp.rusty,
         cruising: sp.cruising, targets: sp.kind === 'winch' ? ['left', 'right'] : undefined,
+        rover: sp.kind === 'rover' ? (sp.rover ?? (sp.working ? 'out' : 'home')) : undefined, ping: sp.kind === 'rover' && sp.boosted,
       });
     }
     const hfx = (this as unknown as { hfx?: Phaser.GameObjects.Graphics }).hfx;

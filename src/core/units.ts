@@ -75,6 +75,9 @@ export function sellRefund(s: GameState, uid: number): Cost | null {
     levels = BEAM.levels;
   } else if (mod.defId === 'winch') {
     paid = mod.paid;
+  } else if (mod.defId === 'rover') {
+    if (s.rover.status !== 'home') return null; // not while the Rover is out or its haul is waiting
+    paid = mod.paid;
   } else if (mod.defId === 'solar' || mod.defId === 'engine') {
     if (mod.defId === 'engine' && s.travel.dest !== null) return null; // not mid-cruise
     paid = mod.paid;

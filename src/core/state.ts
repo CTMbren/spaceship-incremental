@@ -2,10 +2,11 @@ import { BAL } from '../data/balance';
 import { HULL_TUG } from '../data/hulls';
 import { cellKey } from './hull';
 import { initialJobs } from './jobs';
+import { initialRover } from './rover';
 import type { GameState, ItemId } from './types';
 
-export const SAVE_VERSION = 10;
-export const ITEM_IDS: readonly ItemId[] = ['ore', 'ice', 'plate', 'coolant', 'circuit', 'core_shard'];
+export const SAVE_VERSION = 11;
+export const ITEM_IDS: readonly ItemId[] = ['ore', 'ice', 'plate', 'coolant', 'circuit', 'core_shard', 'sand', 'resin'];
 
 export function createInitialState(seed = 1): GameState {
   const items = Object.fromEntries(ITEM_IDS.map((i) => [i, 0])) as Record<ItemId, number>;
@@ -29,6 +30,7 @@ export function createInitialState(seed = 1): GameState {
     smelters: [],
     melters: [],
     fabs: [],
+    rover: initialRover((seed ^ 0x50e) >>> 0),
     handLevel: 1,
     stats: { rocks: 0, geodes: 0, sold: 0, taps: 0, holdTicks: 0, sent: 0, smashed: 0, overheats: 0, smelted: 0, melted: 0, fabbed: 0 },
     pity: 0,

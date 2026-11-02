@@ -1,4 +1,5 @@
-export type ItemId = 'ore' | 'ice' | 'plate' | 'coolant' | 'circuit' | 'core_shard';
+/** Day 11 adds Veda's planet goods: Glass Sand and Amber Resin (from the Rover). */
+export type ItemId = 'ore' | 'ice' | 'plate' | 'coolant' | 'circuit' | 'core_shard' | 'sand' | 'resin';
 
 export interface Cell {
   x: number;
@@ -22,7 +23,7 @@ export interface HullDef {
   tileCosts: Cost[];
 }
 
-export type ModuleId = 'beam' | 'smasher' | 'smelter' | 'solar' | 'engine' | 'grapple' | 'winch' | 'melter' | 'fab';
+export type ModuleId = 'beam' | 'smasher' | 'smelter' | 'solar' | 'engine' | 'grapple' | 'winch' | 'melter' | 'fab' | 'rover';
 
 /** Modules that turn items into other items in batches (Day 10: Ice Melter and Fabricator join the Smelter). */
 export type ConverterId = 'smelter' | 'melter' | 'fab';
@@ -114,6 +115,42 @@ export interface TravelState {
   visited: number[];
 }
 
+/** What a Rover trip brings home. */
+export interface Haul {
+  credits: number;
+  items: Partial<Record<ItemId, number>>;
+  /** Notes for the reveal ("Relic sold for 150 credits", "Old fleet cache"). */
+  notes: string[];
+}
+
+/** The Rover (Day 11): one trip at a time from the Rover Bay, at a planet Orbit. */
+export interface RoverState {
+  /** home: in the Bay. out: on a trip. back: returned with a haul waiting to be collected. */
+  status: 'home' | 'out' | 'back';
+  site: 'dunes' | 'crater' | 'ruins' | null;
+  /** Trip seconds done and the trip's full length (Wheels shorten it). */
+  t: number;
+  total: number;
+  /** The Rover's own RNG (mulberry32 state) and the seed drawn for the current trip. */
+  seed: number;
+  tripSeed: number;
+  /** Attachments bought, and the ones fitted (up to 3). Fitted at launch: changing them mid-trip does nothing. */
+  owned: ('drill' | 'wheels' | 'cargo' | 'battery' | 'scanner')[];
+  fitted: ('drill' | 'wheels' | 'cargo' | 'battery' | 'scanner')[];
+  /** The fit used by the trip under way (fixed at launch). */
+  tripFit: ('drill' | 'wheels' | 'cargo' | 'battery' | 'scanner')[];
+  /** Ruins counters: trips done, trips since the last Core Shard. */
+  ruinsTrips: number;
+  ruinsPity: number;
+  /** Scanner ping: trip-second of the next ping, and seconds left on the one showing (0 = none). */
+  nextPing: number;
+  pingLeft: number;
+  /** Rare Crates caught on this trip. */
+  crates: number;
+  haul: Haul | null;
+  trips: number;
+}
+
 export interface CrusherState {
   rock: Rock | null;
   heat: number;
@@ -190,6 +227,7 @@ export interface GameState {
   /** Day 10: Ice Melters (2 Ice -> 1 Coolant) and Fabricators (2 Plate + 1 Coolant -> 1 Circuit). */
   melters: ConverterState[];
   fabs: ConverterState[];
+  rover: RoverState;
   /** Hand Tools level 1..4 (Workshop). */
   handLevel: number;
   stats: Stats;
@@ -222,6 +260,9 @@ export type GameEvent =
   | { kind: 'job_done'; slot: number; credits: number; rep: number }
   | { kind: 'rank_up'; rank: number }
   | { kind: 'arrived'; node: number }
+  | { kind: 'rover_back'; site: string }
+  | { kind: 'rover_ping' }
+  | { kind: 'rover_crate' }
   | { kind: 'repaired' }
   | { kind: 'smelted'; plate: number; uid?: number }
   | { kind: 'converted'; module: ConverterId; item: ItemId; qty: number; uid: number }

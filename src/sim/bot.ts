@@ -12,6 +12,8 @@ import {
 } from '../core/loop';
 import { freeCells, freeCellsFor, moduleCost, moduleCount, moduleUnlocked, placeModule } from '../core/modules';
 import { evaluatePower, sparePower } from '../core/power';
+import { buyAttachment, canLaunch, collectHaul, launchRover } from '../core/rover';
+import { ATTACHMENTS } from '../data/rover';
 import { canDepart, depart, hasVisited, inTransit } from '../core/travel';
 import { canDeliver, deliverJob, rank } from '../core/jobs';
 import { RANK } from '../data/jobs';
@@ -40,6 +42,8 @@ export interface Milestones {
   salvager?: number;
   contractor?: number;
   melter?: number;
+  orbit?: number;
+  roverBay?: number;
   fab?: number;
   /** tiles owned -> seconds when reached */
   tiles: Record<number, number>;
@@ -92,7 +96,8 @@ function placeWithPower(s: GameState, id: ModuleId): GameState | null {
 
 /** Converters the ship still needs a tile for (the Melter, then the Fabricator): copies must leave room. */
 const tilesToKeep = (s: GameState): number =>
-  (s.melters.length === 0 && hasVisited(s, 'belt') ? 1 : 0) + (s.fabs.length === 0 && hasVisited(s, 'belt') ? 1 : 0);
+  (s.melters.length === 0 && hasVisited(s, 'belt') ? 1 : 0) + (s.fabs.length === 0 && hasVisited(s, 'belt') ? 1 : 0)
+  + (moduleCount(s, 'rover') === 0 && hasVisited(s, 'rings') ? 1 : 0);
 
 /** Travel policy: leave as soon as the Engine can, but only for the Belt once the Grapple is built for the next leg. */
 function travel(s: GameState): GameState {
@@ -129,6 +134,18 @@ function spend(s0: GameState): GameState {
       if (moduleCount(s, id) === 0 && moduleUnlocked(s, id) && moduleCost(s, id) && canAfford(s, moduleCost(s, id)!) === 'ok') {
         const next = placeWithPower(s, id);
         if (next) { s = next; break; }
+      }
+    }
+    // Day 11: the Rover Bay at Veda, and attachments (Wheels, Drill, Battery first)
+    if (moduleCount(s, 'rover') === 0 && moduleUnlocked(s, 'rover') && moduleCost(s, 'rover') && canAfford(s, moduleCost(s, 'rover')!) === 'ok') {
+      const next = placeWithPower(s, 'rover');
+      if (next) { s = next; continue; }
+    }
+    if (moduleCount(s, 'rover') > 0) {
+      const want = (['wheels', 'drill', 'battery'] as const).find((a) => !s.rover.owned.includes(a) && canAfford(s, ATTACHMENTS[a].cost) === 'ok');
+      if (want) {
+        const r = buyAttachment(s, want);
+        if (r.ok) { s = r.state; continue; }
       }
     }
     // the Auto-Winch next to a beam once the Contractor rank allows it
@@ -177,6 +194,17 @@ function spend(s0: GameState): GameState {
   return s;
 }
 
+/** The Rover: collect a haul, then send it down again. */
+function rover(s0: GameState): GameState {
+  let s = s0.rover.status === 'back' ? collectHaul(s0).state : s0;
+  if (canLaunch(s).ok) {
+    // Dunes for the Sand that buys Wheels and Drill, the Crater for the Resin that buys the Battery, then the Ruins
+    const site = s.rover.owned.length < 2 ? 'dunes' : s.rover.owned.length < 3 ? 'crater' : 'ruins';
+    s = launchRover(s, site).state;
+  }
+  return s;
+}
+
 function look(s0: GameState, policy: Policy, dt: number): GameState {
   let s = s0;
   // fire beams whenever they are idle and the stage is free
@@ -220,13 +248,14 @@ export function runSim(policy: Policy, minutes: number, seed = 1): SimResult {
       // while saving Plate for the next Smasher copy the bot keeps its Plate and the Ore the Smelter turns into it
       const need = moduleCost(s, 'smasher')?.items?.plate ?? 0;
       const saving = s.ship.ownedCells.length >= HULL_END && moduleCount(s, 'engine') > 0 && smasherReady(s) && s.smashers.length < 3 && freeCells(s).length > tilesToKeep(s);
-      const sellItems = SELLABLE.filter((i) => !(saving && (i === 'plate' || (i === 'ore' && s.items.plate < need)))); // Ore feeds the Smelter
+      const goods = (i: string) => (i === 'sand' || i === 'resin' || i === 'circuit') && moduleCount(s, 'rover') > 0 && s.rover.owned.length < 3; // they buy attachments
+      const sellItems = SELLABLE.filter((i) => !goods(i) && !(saving && (i === 'plate' || (i === 'ore' && s.items.plate < need)))); // Ore feeds the Smelter
       if (sellValue(s, sellItems) > 0) {
         const o = sellSelected(s, sellItems);
         if (t > end - 300) sold5 += o.state.credits - s.credits;
         s = o.state;
       }
-      s = spend(s);
+      s = spend(rover(s));
     }
     void before;
     if (ms.smelter === undefined && s.smelters.length > 0) ms.smelter = t;
@@ -242,6 +271,8 @@ export function runSim(policy: Policy, minutes: number, seed = 1): SimResult {
     if (ms.salvager === undefined && rank(s) >= RANK.slot) ms.salvager = t;
     if (ms.contractor === undefined && rank(s) >= RANK.winch) ms.contractor = t;
     if (ms.melter === undefined && moduleCount(s, 'melter') > 0) ms.melter = t;
+    if (ms.orbit === undefined && hasVisited(s, 'orbit')) ms.orbit = t;
+    if (ms.roverBay === undefined && moduleCount(s, 'rover') > 0) ms.roverBay = t;
     if (ms.fab === undefined && moduleCount(s, 'fab') > 0) ms.fab = t;
     const n = s.ship.ownedCells.length;
     if (ms.tiles[n] === undefined) ms.tiles[n] = t;

@@ -95,6 +95,12 @@ export const MODULES = {
       { credits: 400, items: { plate: 30, coolant: 8 } },
     ] as Cost[],
   },
+  /** Day 11: the Rover Bay. One per ship, offered once the ship reaches a planet Orbit (Veda). 1x1 until footprints. */
+  rover: {
+    name: 'Rover Bay',
+    placement: 'edge' as const, // the Rover needs a door to open space
+    costs: [{ credits: 0, items: { plate: 12, circuit: 2 } }] as Cost[],
+  },
 } as const;
 
 /** Share of a module's price (and its upgrade credits) paid back when it is sold. */

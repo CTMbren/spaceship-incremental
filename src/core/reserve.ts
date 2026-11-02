@@ -11,7 +11,7 @@ import { hasVisited } from './travel';
 import { needsSmelter, smasherReady } from './units';
 import type { Cost, GameState, ItemId, ModuleId } from './types';
 
-export type StructureGoalId = 'smelter' | 'repair' | 'solar' | 'beam2' | 'engine' | 'grapple' | 'melter' | 'fab' | 'expand';
+export type StructureGoalId = 'smelter' | 'repair' | 'solar' | 'beam2' | 'engine' | 'grapple' | 'melter' | 'fab' | 'rover' | 'expand';
 
 /**
  * The structure purchase the player is working toward next (after the first sell). Sell and the Smelter
@@ -43,6 +43,7 @@ export function structureGoal(s: GameState): { id: StructureGoalId; cost: Cost }
   if (hasVisited(s, 'belt') && moduleCount(s, 'grapple') === 0) return build('grapple', 'grapple');
   if (moduleUnlocked(s, 'melter') && moduleCount(s, 'melter') === 0 && s.stats.melted === 0) return build('melter', 'melter');
   if (moduleUnlocked(s, 'fab') && moduleCount(s, 'fab') === 0 && s.stats.fabbed === 0) return build('fab', 'fab');
+  if (moduleUnlocked(s, 'rover') && moduleCount(s, 'rover') === 0 && s.rover.trips === 0) return build('rover', 'rover');
   return expand;
 }
 
@@ -98,7 +99,7 @@ export const availableQty = (s: GameState, item: ItemId): number =>
   Math.max(0, Math.floor(s.items[item]) - reservedQty(s, item) - (feedReserves(s)[item] ?? 0));
 
 /** Items the Sell button handles (Core Shards are kept). */
-export const SELLABLE: readonly ItemId[] = ['ore', 'ice', 'plate', 'coolant', 'circuit'];
+export const SELLABLE: readonly ItemId[] = ['ore', 'ice', 'plate', 'coolant', 'circuit', 'sand', 'resin'];
 
 /** Credits selling the given items (default: all sellable) would pay right now. */
 export function sellValue(s: GameState, items: readonly ItemId[] = SELLABLE): number {

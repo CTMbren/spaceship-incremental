@@ -16,12 +16,14 @@ import { applyOffline, stamp, type OfflineReport } from '../core/offline';
 import { cargoRows, sellMode } from '../core/cargo';
 import { canSellBeam, moveModule, sellModule, sellRefund, smasherReady } from '../core/units';
 import { CONVERTERS, converterOf, recipeText, unitsOf } from '../core/converters';
+import { atOrbit, buyAttachment, canLaunch, claimPing, collectHaul, launchRover, recallHaul, recallRover, toggleFit, tripSec } from '../core/rover';
+import { ATTACHMENT_IDS, ATTACHMENTS, ROVER, SITE_IDS, SITES, type AttachmentId, type SiteId } from '../data/rover';
 import { fmtNum, formatVersion } from '../core/format';
 import { SELLABLE, sellValue } from '../core/reserve';
 import { readyUpgrades } from '../core/upgrades';
 import { loadFromStorage, parseSave, saveToStorage, serialize } from '../core/save';
 import { createInitialState } from '../core/state';
-import type { Cell, Cost, GameEvent, GameState, ItemId, ModuleId, Rock } from '../core/types';
+import type { Cell, Cost, GameEvent, GameState, Haul, ItemId, ModuleId, Rock } from '../core/types';
 import { BAL } from '../data/balance';
 import { BEAM, FAB, MELTER, MODULES, SMELTER } from '../data/modules';
 import { POWER, SOLAR } from '../data/power';
@@ -97,6 +99,8 @@ const ITEM_LOOK: Record<ItemId, { name: string; color: number }> = {
   coolant: { name: 'Coolant', color: 0x4da3ff },
   circuit: { name: 'Circuit', color: 0x6fd08c },
   core_shard: { name: 'Core Shard', color: 0x8a5ce0 },
+  sand: { name: 'Glass Sand', color: 0xe8d4a0 },
+  resin: { name: 'Amber Resin', color: 0xe08a2e },
 };
 const HOLD_RESET_MS = 1500;
 
@@ -250,7 +254,7 @@ export class ShipScene extends Phaser.Scene {
     // the Map shows a live ETA while cruising
     this.mapTimer += dt;
     const fingerDown = this.input.pointer1?.isDown || this.input.activePointer.isDown; // never rebuild under a tap
-    if (this.mapTimer >= MAP_REFRESH && !fingerDown && ((this.sheetKind === 'map' && inTransit(this.state)) || this.sheetKind === 'jobs')) {
+    if (this.mapTimer >= MAP_REFRESH && !fingerDown && ((this.sheetKind === 'map' && inTransit(this.state)) || this.sheetKind === 'jobs' || (this.sheetKind.startsWith('rover:') && this.state.rover.status === 'out'))) {
       this.mapTimer = 0;
       this.refreshSheet();
     }
@@ -266,6 +270,17 @@ export class ShipScene extends Phaser.Scene {
   private afterEvents(events: GameEvent[]): void {
     if (events.some((e) => e.kind === 'crushed' || e.kind === 'smashed' || e.kind === 'smelted' || e.kind === 'converted' || e.kind === 'arrived' || e.kind === 'job_posted' || e.kind === 'jobs_open')) this.redraw();
     if (events.some((e) => e.kind === 'jobs_open')) this.showToast('New: the Job Board. Open the Jobs tab.');
+    const back = events.find((e) => e.kind === 'rover_back');
+    if (back && back.kind === 'rover_back') {
+      this.persist();
+      this.redraw();
+      this.showToast(`The Rover is back from the ${back.site}. Tap the Rover Bay.`);
+      if (this.sheetKind.startsWith('rover:')) this.refreshSheet();
+    }
+    if (events.some((e) => e.kind === 'rover_ping')) {
+      this.showToast('Ping! Tap the Rover Bay for a Rare Crate');
+      if (this.sheetKind.startsWith('rover:')) this.refreshSheet();
+    }
     const arrived = events.find((e) => e.kind === 'arrived');
     if (arrived && arrived.kind === 'arrived') {
       this.persist();
@@ -325,7 +340,7 @@ export class ShipScene extends Phaser.Scene {
       const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
       return h > 0 ? `${h}h ${m}m` : `${Math.max(1, m)}m`;
     };
-    const names: Record<string, string> = { ore: 'Ore', ice: 'Ice', plate: 'Plate', coolant: 'Coolant', circuit: 'Circuit', core_shard: 'Shard' };
+    const names: Record<string, string> = { ore: 'Ore', ice: 'Ice', plate: 'Plate', coolant: 'Coolant', circuit: 'Circuit', core_shard: 'Shard', sand: 'Glass Sand', resin: 'Amber Resin' };
     const gains = Object.entries(r.items).filter(([, v]) => (v ?? 0) > 0).map(([k, v]) => `${(v ?? 0) > 0 ? '+' : ''}${Math.round(v ?? 0)} ${names[k]}`);
     this.showSheet('welcome', () => {
       const rows: SheetRow[] = [{ t: 'text', text: `You were away ${dur(r.awaySec)}.${r.capped ? ' Time away counts up to 8 hours.' : ''}`, color: T.text }];
@@ -335,6 +350,7 @@ export class ShipScene extends Phaser.Scene {
       }
       if (r.arrived.length > 0) rows.push({ t: 'text', text: `The ship flew on while you were away and reached ${r.arrived.join(', then ')}.`, color: T.text });
       else if (r.stillCruising) rows.push({ t: 'text', text: 'The ship is still cruising. Open the Map to see how far it has left.' });
+      if (r.roverBack) rows.push({ t: 'text', text: `The Rover came back from the ${r.roverBack} while you were away. Its haul is waiting in the Rover Bay.`, color: T.gold });
       if (r.smeltersCooled) rows.push({ t: 'text', text: this.state.melters.length + this.state.fabs.length > 0 ? 'Smelters, Melters and Fabricators ran for 30 minutes, then went cold, so you came back to raw Ore and Ice. They warm up again now you are here.' : 'Smelters ran for 30 minutes, then went cold, so you came back to raw Ore. They warm up again now you are here.' });
       if (r.smasherRusty) rows.push({ t: 'text', text: 'Repair the Smasher and your ship keeps working while you are away.' });
       else if (r.geodeWaiting) rows.push({ t: 'text', text: 'A geode is waiting in the stage. Only your hands can crack it, and it holds up the beams until you do.' });
@@ -743,6 +759,8 @@ export class ShipScene extends Phaser.Scene {
         hitZone(c, () => (moving ? this.cancelMove() : this.showSmelterSheet(m.uid)));
       } else if (m.defId === 'melter' || m.defId === 'fab') {
         hitZone(c, () => (moving ? this.cancelMove() : this.showConverterSheet(m.uid)));
+      } else if (m.defId === 'rover') {
+        hitZone(c, () => (moving ? this.cancelMove() : this.onRoverTap(m.uid)));
       }
       // hold a beam or Grapple tile: its sheet (upgrade, Move, Sell); a tap still fires it
       if (m.defId === 'beam' || m.defId === 'grapple') this.tileHolds.set(key, () => (moving ? this.cancelMove() : this.showBeamSheet(m.uid)));
@@ -792,6 +810,7 @@ export class ShipScene extends Phaser.Scene {
       case 'fab': return { kind: 'fab', level: st.fabs.find((x) => x.uid === uid)?.level ?? 1, dir, rusty: false, draws };
       case 'solar': case 'engine': return { kind: m.defId, level: m.level ?? 1, dir, rusty: false, draws };
       case 'winch': return { kind: 'winch', level: 1, dir, rusty: false, draws };
+      case 'rover': return { kind: 'rover', level: 1, dir, rusty: false, draws };
       default: return null;
     }
   }
@@ -1477,6 +1496,7 @@ export class ShipScene extends Phaser.Scene {
         { id: 'grapple', sub: `A slow beam (${GRAPPLE.countdown}s) that pulls one big rock. Here and further on: Heavy rocks full of Ore and Ice.` },
         { id: 'winch', sub: 'Fires every beam it touches as soon as the Bay has room, even while you are busy. Put it next to your beams.' },
         { id: 'melter', sub: `Turns ${MELTER.inputs.ice} Ice into ${MELTER.outQty} Coolant on its own. Coolant pays for hull tile 12 and feeds the Fabricator.` },
+        { id: 'rover', sub: 'Sends the Rover down to Veda for Glass Sand, Amber Resin, Relics and maybe a Core Shard. One trip at a time; it works while you do other things.' },
         { id: 'fab', sub: `Turns ${FAB.inputs.plate} Plate + ${FAB.inputs.coolant} Coolant into ${FAB.outQty} Circuit. Circuits pay for the last hull tiles.` },
       ];
       const placeHelp: Record<string, string> = {
@@ -1840,6 +1860,121 @@ export class ShipScene extends Phaser.Scene {
       ];
       if (!grapple && !canSellBeam(st, uid)) rows.push({ t: 'text', text: 'Your last Tractor Beam cannot be sold.' });
       return { title: name, rows };
+    });
+  }
+
+  /** Tap the Rover Bay: grab a ping if one is showing, otherwise open the Rover sheet. */
+  private onRoverTap(uid: number): void {
+    if (this.state.rover.pingLeft > 0) {
+      const out = claimPing(this.state);
+      this.apply(out.state);
+      this.floatAtUid(uid, 'Rare Crate!', T.gold);
+      if (this.sheetKind.startsWith('rover:')) this.refreshSheet();
+      return;
+    }
+    this.showRoverSheet(uid);
+  }
+
+  /** "6-9 Glass Sand · 4-6 Plate" for a site with this fit. */
+  private siteFinds(site: SiteId, fit: readonly AttachmentId[]): string {
+    const parts: string[] = [];
+    const mul = (fit.includes('drill') ? ROVER.drillMul : 1) * (fit.includes('battery') && SITES[site].sec >= ROVER.batteryMinSec ? ROVER.batteryMul : 1);
+    const flat = fit.includes('cargo') ? ROVER.cargoFlat : 0;
+    for (const [k, [a, b]] of Object.entries(SITES[site].gives) as [ItemId, [number, number]][]) {
+      parts.push(`${Math.floor(a * mul) + flat}-${Math.floor(b * mul) + flat} ${ITEM_LOOK[k].name}`);
+    }
+    for (const c of SITES[site].chance ?? []) parts.push(`${Math.round(c.p * 100)}% a ${ITEM_LOOK[c.item].name}`);
+    if (site === 'ruins') parts.push('Relics, Core Shard chance');
+    return parts.join(' · ');
+  }
+
+  private haulText(h: Haul): string {
+    const items = (Object.entries(h.items) as [ItemId, number][]).filter(([, n]) => n > 0).map(([k, n]) => `+${fmtNum(n)} ${ITEM_LOOK[k].name}`);
+    if (h.credits > 0) items.unshift(`+${fmtNum(h.credits)} credits`);
+    return items.join(' · ');
+  }
+
+  /** Rover Bay tile: the trip under way (ping, Recall), the haul to collect, the sites, the attachments. */
+  private showRoverSheet(uid: number): void {
+    this.sellArm = null;
+    this.mapTimer = 0;
+    this.showSheet(`rover:${uid}`, () => {
+      const st = this.state;
+      const rv = st.rover;
+      const rows: SheetRow[] = [];
+      if (rv.status === 'out' && rv.site) {
+        rows.push({ t: 'heading', text: `Rover at the ${SITES[rv.site].name}` });
+        rows.push({ t: 'text', text: `${this.clock(Math.max(0, rv.total - rv.t))} left. ${Math.floor((rv.t / rv.total) * 100)}% of the trip.${rv.crates ? ` ${rv.crates} Rare Crate${rv.crates > 1 ? 's' : ''} caught.` : ''}`, color: T.text });
+        if (rv.pingLeft > 0) {
+          rows.push({
+            t: 'card', title: 'Ping!', sub: `Something shiny. Grab it in ${Math.ceil(rv.pingLeft)}s for a Rare Crate.`, verb: 'Grab it', cost: '', can: true,
+            fn: () => this.onRoverTap(uid),
+          });
+        }
+        const half = recallHaul(st);
+        rows.push({
+          t: 'card', title: 'Recall', sub: `Comes home now with half its finds${half ? ` (${this.haulText(half)})` : ''}. No Relic or Shard.`,
+          verb: 'Recall', cost: '', can: true,
+          fn: () => { this.apply(recallRover(this.state).state); this.showToast('The Rover is home'); this.refreshSheet(); },
+        });
+      } else if (rv.status === 'back' && rv.haul && rv.site) {
+        rows.push({ t: 'heading', text: `Back from the ${SITES[rv.site].name}` });
+        rows.push({ t: 'text', text: this.haulText(rv.haul), color: T.gold });
+        for (const n of rv.haul.notes) rows.push({ t: 'text', text: n, color: T.gold });
+        rows.push({
+          t: 'card', title: 'Collect the haul', sub: 'Into the hold. Then send it down again.', verb: 'Collect', cost: '', can: true,
+          fn: () => {
+            const h = this.state.rover.haul;
+            this.apply(collectHaul(this.state).state);
+            if (h) this.floatAtUid(uid, h.credits > 0 ? `+${fmtNum(h.credits)}` : 'Collected', T.gold);
+            this.refreshSheet();
+          },
+        });
+      } else {
+        const chk = canLaunch(st);
+        rows.push({ t: 'text', text: atOrbit(st) ? 'Send the Rover down to a site. It comes back on its own; collect its haul here. One trip at a time, and the ship cannot leave while it is out.' : `The Rover is in the Bay. It can only go down from a planet orbit: fly to ${ROUTE[3].name}.` });
+        for (const id of SITE_IDS) {
+          const sd = SITES[id];
+          rows.push({
+            t: 'card', title: `${sd.name} · ${this.clock(tripSec(id, rv.fitted))}`, sub: this.siteFinds(id, rv.fitted),
+            verb: chk.ok ? 'Send' : chk.label, cost: '', can: chk.ok,
+            fn: () => {
+              const out = launchRover(this.state, id);
+              if (out.state === this.state) return;
+              this.apply(out.state);
+              this.flashAt.set(uid, this.elapsed);
+              this.showToast(`The Rover is off to the ${sd.name}`);
+              this.refreshSheet();
+            },
+          });
+        }
+      }
+      rows.push({ t: 'heading', text: `Attachments · ${rv.fitted.length} of ${ROVER.slots} fitted` });
+      rows.push({ t: 'text', text: rv.status === 'out' ? 'Changes count from the next trip.' : 'Buy each once; any three fit at a time.' });
+      for (const id of ATTACHMENT_IDS) {
+        const a = ATTACHMENTS[id];
+        if (rv.owned.includes(id)) {
+          const on = rv.fitted.includes(id);
+          rows.push({
+            t: 'card', title: `${a.name}${on ? ' · fitted' : ''}`, sub: a.blurb, verb: on ? 'Take off' : 'Fit', cost: '',
+            can: on || rv.fitted.length < ROVER.slots,
+            fn: () => { this.apply(toggleFit(this.state, id)); this.refreshSheet(); },
+          });
+        } else {
+          rows.push({
+            t: 'card', title: a.name, sub: a.blurb, verb: 'Buy', cost: costText(a.cost), can: canAfford(st, a.cost) === 'ok',
+            fn: () => {
+              const r = buyAttachment(this.state, id);
+              if (!r.ok) { this.showToast(r.reason === 'need_items' ? 'Not enough materials' : 'Not enough credits'); return; }
+              this.apply(r.state);
+              this.refreshSheet();
+            },
+          });
+        }
+      }
+      rows.push(...this.moveSellRows(uid));
+      if (rv.status !== 'home') rows.push({ t: 'text', text: 'The Rover Bay can be sold once the Rover is home and its haul collected.' });
+      return { title: 'Rover Bay', rows };
     });
   }
 
@@ -2381,6 +2516,7 @@ export class ShipScene extends Phaser.Scene {
         powered: !art.draws || power.powered.has(m.uid), boosted: power.boosted.has(m.uid),
         flash: this.flashOf(m.uid), calm: this.calm, rusty: art.rusty,
         cruising: m.defId === 'engine' && inTransit(st), targets: undefined as Dir[] | undefined,
+        rover: undefined as 'home' | 'out' | 'back' | undefined, ping: false,
       };
       if (m.defId === 'beam' || m.defId === 'grapple') {
         const beam = st.beams.find((b) => b.uid === m.uid);
@@ -2426,6 +2562,12 @@ export class ShipScene extends Phaser.Scene {
           sg.fillStyle(0x000000, 0.5).fillRoundedRect(p.x + 7, p.y + 7, TILE - 14, TILE - 14, 8);
           label(`s${m.uid}`, cx, cy, 'OFF');
         }
+      } else if (m.defId === 'rover') {
+        const rv = st.rover;
+        fx.working = rv.status === 'out';
+        fx.progress = rv.total > 0 ? rv.t / rv.total : 0;
+        fx.rover = rv.status;
+        fx.ping = rv.pingLeft > 0;
       } else if (m.defId === 'solar') {
         fx.working = true;
       } else if (m.defId === 'engine') {
@@ -2466,7 +2608,7 @@ export class ShipScene extends Phaser.Scene {
       }
     }
     // Open tiles that fit the current goal pulse
-    const goalModule: Partial<Record<string, ModuleId>> = { smelter: 'smelter', beam2: 'beam', solar: 'solar', engine: 'engine', grapple: 'grapple', melter: 'melter', fab: 'fab' };
+    const goalModule: Partial<Record<string, ModuleId>> = { smelter: 'smelter', beam2: 'beam', solar: 'solar', engine: 'engine', grapple: 'grapple', melter: 'melter', fab: 'fab', rover: 'rover' };
     const gm = goalId ? goalModule[goalId] : undefined;
     if (gm) {
       const pulse = 0.45 + 0.55 * Math.sin(now * 5);
@@ -2702,6 +2844,16 @@ export class ShipScene extends Phaser.Scene {
         g.fillStyle(0x1c2542, 1).fillPoints(pts, true);
         for (let k = -w / 2 + 8; k < w / 2; k += 14) g.fillStyle(0x0f1630, 1).fillCircle(x + k * c, y + k * s2, 2);
       }
+    } else if (key === 'orbit') {
+      // Veda fills the upper right: a banded flat-vector planet with a soft rim
+      const px = W - 40, py = top + 120, r = 190;
+      g.fillStyle(0x3a2a5e, 1).fillCircle(px, py, r + 8);
+      g.fillStyle(0x4b3a78, 1).fillCircle(px, py, r);
+      g.fillStyle(0x5a4690, 1).fillEllipse(px, py - 60, r * 2 - 30, 46);
+      g.fillStyle(0x3f3068, 1).fillEllipse(px, py + 30, r * 2 - 10, 34);
+      g.fillStyle(0x6a55a8, 0.7).fillEllipse(px - 40, py + 90, r * 1.4, 22);
+      g.fillStyle(0x2a1f48, 0.55).fillCircle(px + 60, py + 60, r * 0.8); // terminator shade
+      for (let i = 0; i < 18; i++) g.fillStyle(0xe6ecff, 0.25).fillCircle(rnd.between(0, W), rnd.between(top, bottom), 1);
     } else if (key === 'belt' || key === 'rings') {
       if (key === 'rings') {
         g.fillStyle(0x2a2350, 1).fillCircle(W + 30, top + 40, 120);

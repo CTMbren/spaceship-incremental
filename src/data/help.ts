@@ -44,6 +44,15 @@ export const HELP: readonly HelpCard[] = [
     ],
   },
   {
+    title: 'Veda Orbit and the Rover',
+    lines: [
+      'Fly on from the Ring Fields to Veda Orbit and build a Rover Bay on an outside tile. Tap it to send the Rover down to a site: Dunes (4 min), Crater (8 min) or Ruins (15 min).',
+      'It comes back on its own, even while you are away (one trip at most). Tap the Bay to collect: Glass Sand, Amber Resin, Plate, Ore, Relics, and sometimes a Core Shard from the Ruins (every 6th Ruins trip is sure to have one).',
+      'Glass Sand and Amber Resin buy Rover attachments (any 3 fit): Drill, Wheels, Cargo Rack, Battery, Scanner. With a Scanner, gold pings show on the Bay: tap one in time for a Rare Crate.',
+      'Recall brings the Rover home early with half its finds. The ship cannot leave while the Rover is out.',
+    ],
+  },
+  {
     title: 'Moving and selling modules',
     lines: [
       'Tap a module (or hold a beam tile, since a tap fires it) to open its sheet. Move picks it up: tap a glowing Open tile to drop it. Free.',

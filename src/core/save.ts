@@ -1,6 +1,7 @@
 import { MODULES } from '../data/modules';
 import { SOLAR } from '../data/power';
 import { initialJobs } from './jobs';
+import { initialRover } from './rover';
 import { evaluatePower } from './power';
 import { SAVE_VERSION, createInitialState } from './state';
 import type { BeamState, GameState, Rock } from './types';
@@ -135,6 +136,11 @@ export function parseSave(raw: string | null): { ok: true; state: GameState } | 
       // v9 -> v10 (Day 10): Ice Melters and Fabricators, and their stats.
       const stats = { ...createInitialState().stats, ...(cur.stats ?? {}) };
       cur = { ...cur, melters: cur.melters ?? [], fabs: cur.fabs ?? [], stats, version: 10 };
+    }
+    if (cur.version < 11) {
+      // v10 -> v11 (Day 11): the Rover and Veda's planet goods.
+      const fresh = createInitialState();
+      cur = { ...cur, items: { ...fresh.items, ...(cur.items ?? {}) }, rover: cur.rover ?? initialRover(((cur.rng ?? 1) ^ 0x50e) >>> 0), version: 11 };
     }
     return { ok: true, state: { ...createInitialState(), ...cur } as GameState };
   } catch {

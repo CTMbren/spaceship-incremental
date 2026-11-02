@@ -7,7 +7,7 @@
 import { C } from '../palette';
 import { DIR_V, INK, S, along, disc, frame, grey, hazard, plate, polyAlong, rivet, tint, type Dir, type G } from './kit';
 
-export type ArtKind = 'beam' | 'grapple' | 'smasher' | 'smelter' | 'solar' | 'engine' | 'winch' | 'melter' | 'fab' | 'open';
+export type ArtKind = 'beam' | 'grapple' | 'smasher' | 'smelter' | 'solar' | 'engine' | 'winch' | 'melter' | 'fab' | 'rover' | 'open';
 
 export interface BodyOpts {
   level: number;
@@ -36,13 +36,16 @@ export interface FxOpts {
   cruising?: boolean;
   /** Auto-Winch: directions of the beams it is working. */
   targets?: Dir[];
+  /** Rover Bay: where the Rover is, and whether a gold ping is showing. */
+  rover?: 'home' | 'out' | 'back';
+  ping?: boolean;
 }
 
 const STEEL = 0x8fa0be;
 const DARK_STEEL = 0x5c6b8a;
 const HOUSING = 0x3d4a6b;
 const FACE: Record<ArtKind, number> = {
-  beam: 0x22304e, grapple: 0x17393b, smasher: 0x3b2a26, smelter: 0x3a2a24, solar: 0x14223f, engine: 0x2a2342, winch: 0x3a3020, melter: 0x1d3346, fab: 0x1d3a2c, open: 0x18223f,
+  beam: 0x22304e, grapple: 0x17393b, smasher: 0x3b2a26, smelter: 0x3a2a24, solar: 0x14223f, engine: 0x2a2342, winch: 0x3a3020, melter: 0x1d3346, fab: 0x1d3a2c, rover: 0x33283a, open: 0x18223f,
 };
 
 const col = (c: number, dark?: boolean) => (dark ? grey(c) : c);
@@ -135,6 +138,16 @@ export function drawBody(g: G, kind: ArtKind, x: number, y: number, o: BodyOpts)
       for (let i = 0; i < 6; i++) g.fillStyle(INK, 0.85).fillRect(x + 13 + i * 5.5, y + 44.5, 2.5, 2.5);
       plate(g, x + 9, y + 10, 38, 5, 2, col(STEEL, d), 1.5);
       for (const xx of [11, 45]) g.fillStyle(INK, 1).fillRect(x + xx - 1, y + 14, 2.5, 9);
+      break;
+    }
+    case 'rover': {
+      // a hangar arch with a hazard sill; the Rover itself is drawn live (it leaves on trips)
+      plate(g, x + 10, y + 12, 36, 30, 6, col(DARK_STEEL, d));
+      g.fillStyle(INK, 1).fillRoundedRect(x + 14, y + 16, 28, 24, { tl: 10, tr: 10, bl: 1, br: 1 });
+      g.fillStyle(col(0x15182a, d), 1).fillRoundedRect(x + 15.5, y + 17.5, 25, 22.5, { tl: 9, tr: 9, bl: 0, br: 0 });
+      for (let i = 0; i < 5; i++) g.fillStyle(i % 2 ? INK : col(C.crit, d), 1).fillRect(x + 12 + i * 6.4, y + 42, 6.4, 3);
+      rivet(g, x + 13, y + 15);
+      rivet(g, x + 43, y + 15);
       break;
     }
     case 'solar': {
@@ -330,6 +343,38 @@ export function drawFx(g: G, kind: ArtKind, x: number, y: number, o: FxOpts): vo
       if (o.boosted && o.powered) sparks(g, cx, cy, 15, t);
       break;
     }
+    case 'rover': {
+      const state = o.rover ?? 'home';
+      if (state !== 'out') {
+        // the Rover in the hangar: a small six-wheeled body with a mast light
+        const by = y + 31;
+        g.fillStyle(INK, 1).fillRoundedRect(x + 18, by - 6, 20, 9, 3);
+        g.fillStyle(o.powered ? 0xd9a441 : grey(0xd9a441), 1).fillRoundedRect(x + 19.5, by - 4.5, 17, 6, 2);
+        g.fillStyle(INK, 1).fillRect(x + 31, by - 12, 1.8, 7);
+        const blink = state === 'back' ? 0.5 + 0.5 * Math.sin(t * 8) : 0.5 + 0.5 * Math.sin(t * 2);
+        g.fillStyle(state === 'back' ? 0xffc83d : C.beam, o.powered ? blink : 0.2).fillCircle(x + 32, by - 13, 2);
+        for (const wx of [21, 28, 35]) { g.fillStyle(INK, 1).fillCircle(x + wx, by + 4, 3); g.fillStyle(0x5c6b8a, 1).fillCircle(x + wx, by + 4, 1.6); }
+        if (state === 'back') {
+          // the haul: a gold crate bobbing beside it
+          const bob = Math.sin(t * 4) * 1.5;
+          g.fillStyle(INK, 1).fillRect(x + 37, y + 20 + bob, 8, 7);
+          g.fillStyle(0xffc83d, 1).fillRect(x + 38, y + 21 + bob, 6, 5);
+        }
+      } else {
+        // out on a trip: the hangar is empty; a trip bar fills along the sill
+        g.fillStyle(INK, 0.9).fillRoundedRect(x + 16, y + 35, 24, 4, 2);
+        g.fillStyle(C.beam, 1).fillRoundedRect(x + 16.5, y + 35.5, 23 * Math.max(0.05, o.progress), 3, 1.5);
+        // tyre tracks leading out of the door
+        for (let i = 0; i < 3; i++) g.fillStyle(0x5c6b8a, 0.5).fillRect(x + 22 + i * 5, y + 30, 2.5, 1.5);
+      }
+      if (o.ping) {
+        const k = 0.5 + 0.5 * Math.sin(t * 10);
+        g.lineStyle(3, 0xffc83d, 0.5 + 0.5 * k).strokeCircle(cx, cy, 20 + 4 * k);
+        g.fillStyle(0xffc83d, 1).fillCircle(cx, y + 10, 4);
+      }
+      if (o.boosted && o.powered) sparks(g, cx, cy, 15, t);
+      break;
+    }
     case 'solar': {
       // a light sweep from cell to cell across the panel
       const cells: [number, number][] = [[0, 0], [1, 0], [2, 0], [2, 1], [1, 1], [0, 1]];
@@ -425,5 +470,5 @@ function sparks(g: G, cx: number, cy: number, r: number, t: number): void {
 
 /** Label under a module's art when "Show labels" is on. */
 export const ART_LABEL: Record<ArtKind, string> = {
-  beam: 'Beam', grapple: 'Grapple', smasher: 'Smash', smelter: 'Smelt', solar: 'Solar', engine: 'Engine', winch: 'Winch', melter: 'Melt', fab: 'Fab', open: 'Open',
+  beam: 'Beam', grapple: 'Grapple', smasher: 'Smash', smelter: 'Smelt', solar: 'Solar', engine: 'Engine', winch: 'Winch', melter: 'Melt', fab: 'Fab', rover: 'Rover', open: 'Open',
 };
